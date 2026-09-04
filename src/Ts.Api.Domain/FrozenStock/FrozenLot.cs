@@ -2,7 +2,7 @@ using Ts.Api.Domain.Common;
 
 namespace Ts.Api.Domain.FrozenStock;
 
-public sealed class FrozenLot
+public sealed class FrozenLot : ITenantOwned
 {
     private readonly List<FrozenStockMovement> _movements = [];
 
@@ -10,6 +10,7 @@ public sealed class FrozenLot
 
     private FrozenLot(
         Guid id,
+        Guid organizationId,
         Guid frozenConfigurationId,
         DateOnly manufacturedOn,
         int producedQuantity,
@@ -18,6 +19,7 @@ public sealed class FrozenLot
         string idempotencyKey)
     {
         Id = id;
+        OrganizationId = organizationId;
         FrozenConfigurationId = frozenConfigurationId;
         ManufacturedOn = manufacturedOn;
         ExpiresOn = FrozenShelfLifePolicy.CalculateExpiration(manufacturedOn);
@@ -28,6 +30,7 @@ public sealed class FrozenLot
     }
 
     public Guid Id { get; private set; }
+    public Guid OrganizationId { get; private set; }
     public Guid FrozenConfigurationId { get; private set; }
     public DateOnly ManufacturedOn { get; private set; }
     public DateOnly ExpiresOn { get; private set; }
@@ -40,6 +43,7 @@ public sealed class FrozenLot
     public bool IsSellableOn(DateOnly date) => Balance > 0 && ExpiresOn >= date;
 
     public static FrozenLot RegisterProduction(
+        Guid organizationId,
         Guid frozenConfigurationId,
         DateOnly manufacturedOn,
         int producedQuantity,
@@ -47,6 +51,11 @@ public sealed class FrozenLot
         DateTimeOffset recordedAt,
         string idempotencyKey)
     {
+        if (organizationId == Guid.Empty)
+        {
+            throw new DomainException("A organização é obrigatória.");
+        }
+
         if (frozenConfigurationId == Guid.Empty)
         {
             throw new DomainException("A configuração de congelado é obrigatória.");
@@ -69,6 +78,7 @@ public sealed class FrozenLot
 
         var lot = new FrozenLot(
             Guid.NewGuid(),
+            organizationId,
             frozenConfigurationId,
             manufacturedOn,
             producedQuantity,
@@ -77,6 +87,7 @@ public sealed class FrozenLot
             idempotencyKey.Trim());
 
         lot._movements.Add(FrozenStockMovement.CreateProductionEntry(
+            organizationId,
             lot.Id,
             producedQuantity,
             recordedBy,

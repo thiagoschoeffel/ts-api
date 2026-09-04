@@ -18,7 +18,8 @@ public interface IFrozenProductionStore
 
 public sealed class RegisterFrozenProductionHandler(
     IFrozenProductionStore store,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IOrganizationContext organizationContext)
 {
     public async Task<RegisterFrozenProductionResult> HandleAsync(
         RegisterFrozenProductionCommand command,
@@ -35,6 +36,7 @@ public sealed class RegisterFrozenProductionHandler(
             ?? throw new ResourceNotFoundException("A configuração de congelado não existe ou está inativa.");
 
         var candidate = FrozenLot.RegisterProduction(
+            organizationContext.OrganizationId,
             command.FrozenConfigurationId,
             command.ManufacturedOn,
             command.ProducedQuantity,

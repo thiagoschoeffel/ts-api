@@ -2,12 +2,13 @@ using Ts.Api.Domain.Common;
 
 namespace Ts.Api.Domain.FrozenStock;
 
-public sealed class FrozenStockMovement
+public sealed class FrozenStockMovement : ITenantOwned
 {
     private FrozenStockMovement() { }
 
     private FrozenStockMovement(
         Guid id,
+        Guid organizationId,
         Guid frozenLotId,
         StockMovementType type,
         int quantity,
@@ -17,6 +18,7 @@ public sealed class FrozenStockMovement
         string? reason)
     {
         Id = id;
+        OrganizationId = organizationId;
         FrozenLotId = frozenLotId;
         Type = type;
         Quantity = quantity;
@@ -27,6 +29,7 @@ public sealed class FrozenStockMovement
     }
 
     public Guid Id { get; private set; }
+    public Guid OrganizationId { get; private set; }
     public Guid FrozenLotId { get; private set; }
     public StockMovementType Type { get; private set; }
     public int Quantity { get; private set; }
@@ -40,6 +43,7 @@ public sealed class FrozenStockMovement
         : Quantity;
 
     internal static FrozenStockMovement CreateProductionEntry(
+        Guid organizationId,
         Guid frozenLotId,
         int quantity,
         Guid actorId,
@@ -52,6 +56,7 @@ public sealed class FrozenStockMovement
 
         return new FrozenStockMovement(
             Guid.NewGuid(),
+            organizationId,
             frozenLotId,
             StockMovementType.ProductionEntry,
             quantity,

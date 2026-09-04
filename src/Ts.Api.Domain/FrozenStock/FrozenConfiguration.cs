@@ -2,12 +2,13 @@ using Ts.Api.Domain.Common;
 
 namespace Ts.Api.Domain.FrozenStock;
 
-public sealed class FrozenConfiguration
+public sealed class FrozenConfiguration : ITenantOwned
 {
     private FrozenConfiguration() { }
 
     private FrozenConfiguration(
         Guid id,
+        Guid organizationId,
         Guid offerId,
         Guid producibleItemId,
         string presentation,
@@ -16,6 +17,7 @@ public sealed class FrozenConfiguration
         decimal unitPrice)
     {
         Id = id;
+        OrganizationId = organizationId;
         OfferId = offerId;
         ProducibleItemId = producibleItemId;
         Presentation = presentation;
@@ -26,6 +28,7 @@ public sealed class FrozenConfiguration
     }
 
     public Guid Id { get; private set; }
+    public Guid OrganizationId { get; private set; }
     public Guid OfferId { get; private set; }
     public Guid ProducibleItemId { get; private set; }
     public string Presentation { get; private set; } = string.Empty;
@@ -35,6 +38,7 @@ public sealed class FrozenConfiguration
     public bool IsActive { get; private set; }
 
     public static FrozenConfiguration Create(
+        Guid organizationId,
         Guid offerId,
         Guid producibleItemId,
         string presentation,
@@ -42,6 +46,11 @@ public sealed class FrozenConfiguration
         MeasurementUnit measurementUnit,
         decimal unitPrice)
     {
+        if (organizationId == Guid.Empty)
+        {
+            throw new DomainException("A organização é obrigatória.");
+        }
+
         if (offerId == Guid.Empty)
         {
             throw new DomainException("A configuração deve referenciar uma oferta existente.");
@@ -74,6 +83,7 @@ public sealed class FrozenConfiguration
 
         return new FrozenConfiguration(
             Guid.NewGuid(),
+            organizationId,
             offerId,
             producibleItemId,
             presentation.Trim(),

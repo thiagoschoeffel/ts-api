@@ -17,7 +17,7 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("Database")
             ?? throw new InvalidOperationException("ConnectionStrings:Database não foi configurada.");
 
-        services.AddDbContextPool<AppDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<ICatalogOfferStore, CatalogOfferStore>();
         services.AddScoped<IProducibleItemStore, ProducibleItemStore>();
         services.AddScoped<IFrozenConfigurationStore, FrozenConfigurationStore>();

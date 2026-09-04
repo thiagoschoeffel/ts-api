@@ -10,6 +10,8 @@ Esta primeira fatia estabelece:
 
 - separação entre API, aplicação, domínio e infraestrutura;
 - PostgreSQL como persistência transacional;
+- fundação SaaS com banco e schema compartilhados e isolamento por `OrganizationId`;
+- organizações, usuários de plataforma e associações de usuário a organizações;
 - domínio inicial de congelados (configuração, lote, validade e movimentação);
 - política central de validade de 90 dias corridos usando `DateOnly`;
 - fontes autoritativas mínimas de Oferta e Item Produzível;
@@ -29,7 +31,9 @@ POST /api/frozen-stock/configurations
 POST /api/frozen-stock/production-entries
 ```
 
-A entrada de produção exige `Idempotency-Key`. Autenticação, autorização e os demais casos de uso ainda serão adicionados antes de qualquer uso operacional real.
+A entrada de produção exige `Idempotency-Key`. O tenant nunca é recebido no payload: ele é obtido da claim autenticada `organization_id`. A configuração de um provedor de identidade e as políticas de autorização ainda serão adicionadas antes de qualquer uso operacional real.
+
+Em `Development`, a organização Sabor Santè é selecionada por uma configuração do servidor para manter os fluxos locais utilizáveis enquanto o provedor de identidade não foi escolhido. Esse fallback não funciona fora do ambiente de desenvolvimento; em produção, chamadas a `/api` sem uma identidade autenticada contendo `organization_id` recebem `401`.
 
 ## Executar com Docker
 
@@ -63,6 +67,8 @@ dotnet build --configuration Release
 - PostgreSQL entra desde o início porque confirmação de Pedido e baixa FEFO exigem transação e concorrência reais.
 - Redis não foi adicionado: ainda não existe um caso de uso concreto que exija cache ou coordenação distribuída. Quando existir, será incluído no `compose.yaml` e acessado por uma abstração da aplicação.
 - O nome e a composição pertencem ao Item Produzível; regras comuns de venda pertencem à Oferta genérica de Congelados; apresentação e preço variável pertencem à `FrozenConfiguration`.
+- Dados de negócio implementam o contrato tenant-owned. Filtros globais do EF Core isolam leituras, `SaveChanges` rejeita escritas de outro tenant e chaves estrangeiras compostas impedem referências cruzadas entre organizações.
+- Unicidades de negócio e idempotência são locais à organização. A migration multi-tenant associa os dados existentes ao tenant inicial Sabor Santè.
 - Impressão será um adapter de infraestrutura separado e nunca alterará lote, estoque ou Pedido.
 
 ## Sequência de implementação

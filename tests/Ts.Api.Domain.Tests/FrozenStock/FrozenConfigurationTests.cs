@@ -11,6 +11,7 @@ public sealed class FrozenConfigurationTests
         var configuration = FrozenConfiguration.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
+            Guid.NewGuid(),
             "300 g",
             300,
             MeasurementUnit.Gram,
@@ -23,6 +24,7 @@ public sealed class FrozenConfigurationTests
     public void Create_RejectsNegativePrice()
     {
         var action = () => FrozenConfiguration.Create(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             "300 g",

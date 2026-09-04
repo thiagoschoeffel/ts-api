@@ -6,6 +6,8 @@ namespace Ts.Api.Domain.Tests.Application;
 
 public sealed class RegisterFrozenProductionHandlerTests
 {
+    private static readonly Guid OrganizationId = Guid.NewGuid();
+
     [Fact]
     public async Task HandleAsync_ReusesResultForSameIdempotentRequest()
     {
@@ -13,7 +15,8 @@ public sealed class RegisterFrozenProductionHandlerTests
         var store = new FrozenProductionStoreFake(configuration);
         var handler = new RegisterFrozenProductionHandler(
             store,
-            new FixedTimeProvider(new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero)));
+            new FixedTimeProvider(new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero)),
+            new OrganizationContextFake(OrganizationId));
         var command = new RegisterFrozenProductionCommand(
             configuration.Id,
             new DateOnly(2026, 9, 4),
@@ -33,7 +36,10 @@ public sealed class RegisterFrozenProductionHandlerTests
     {
         var configuration = CreateConfiguration();
         var store = new FrozenProductionStoreFake(configuration);
-        var handler = new RegisterFrozenProductionHandler(store, new FixedTimeProvider(DateTimeOffset.UtcNow));
+        var handler = new RegisterFrozenProductionHandler(
+            store,
+            new FixedTimeProvider(DateTimeOffset.UtcNow),
+            new OrganizationContextFake(OrganizationId));
         var actorId = Guid.NewGuid();
 
         _ = await handler.HandleAsync(
@@ -56,6 +62,7 @@ public sealed class RegisterFrozenProductionHandlerTests
     }
 
     private static FrozenConfiguration CreateConfiguration() => FrozenConfiguration.Create(
+        OrganizationId,
         Guid.NewGuid(),
         Guid.NewGuid(),
         "300 g",
@@ -92,5 +99,11 @@ public sealed class RegisterFrozenProductionHandlerTests
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => value;
+    }
+
+    private sealed class OrganizationContextFake(Guid organizationId) : IOrganizationContext
+    {
+        public bool IsAvailable => true;
+        public Guid OrganizationId { get; } = organizationId;
     }
 }

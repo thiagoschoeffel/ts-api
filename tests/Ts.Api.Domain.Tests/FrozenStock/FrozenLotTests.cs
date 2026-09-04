@@ -13,6 +13,7 @@ public sealed class FrozenLotTests
 
         var lot = FrozenLot.RegisterProduction(
             Guid.NewGuid(),
+            Guid.NewGuid(),
             new DateOnly(2026, 9, 4),
             24,
             actorId,
@@ -31,6 +32,7 @@ public sealed class FrozenLotTests
     {
         var action = () => FrozenLot.RegisterProduction(
             Guid.NewGuid(),
+            Guid.NewGuid(),
             new DateOnly(2026, 9, 4),
             0,
             Guid.NewGuid(),
@@ -44,6 +46,7 @@ public sealed class FrozenLotTests
     public void IsSellableOn_RejectsExpiredLotEvenWithPhysicalBalance()
     {
         var lot = FrozenLot.RegisterProduction(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             new DateOnly(2026, 1, 1),
             10,
@@ -59,6 +62,7 @@ public sealed class FrozenLotTests
     public void RegisterProduction_RejectsMissingIdempotencyKey()
     {
         var action = () => FrozenLot.RegisterProduction(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             new DateOnly(2026, 9, 4),
             10,

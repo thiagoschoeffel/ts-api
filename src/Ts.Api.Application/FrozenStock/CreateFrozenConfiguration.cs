@@ -36,7 +36,9 @@ public interface IFrozenConfigurationStore
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }
 
-public sealed class CreateFrozenConfigurationHandler(IFrozenConfigurationStore store)
+public sealed class CreateFrozenConfigurationHandler(
+    IFrozenConfigurationStore store,
+    IOrganizationContext organizationContext)
 {
     public async Task<CreateFrozenConfigurationResult> HandleAsync(
         CreateFrozenConfigurationCommand command,
@@ -67,6 +69,7 @@ public sealed class CreateFrozenConfigurationHandler(IFrozenConfigurationStore s
         }
 
         var configuration = FrozenConfiguration.Create(
+            organizationContext.OrganizationId,
             command.OfferId,
             command.ProducibleItemId,
             presentation,

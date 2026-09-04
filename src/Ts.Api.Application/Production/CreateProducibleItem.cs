@@ -14,7 +14,9 @@ public interface IProducibleItemStore
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }
 
-public sealed class CreateProducibleItemHandler(IProducibleItemStore store)
+public sealed class CreateProducibleItemHandler(
+    IProducibleItemStore store,
+    IOrganizationContext organizationContext)
 {
     public async Task<CreateProducibleItemResult> HandleAsync(
         CreateProducibleItemCommand command,
@@ -26,7 +28,7 @@ public sealed class CreateProducibleItemHandler(IProducibleItemStore store)
             throw new ConflictException("Já existe um item produzível com esse nome.");
         }
 
-        var item = ProducibleItem.Create(name);
+        var item = ProducibleItem.Create(organizationContext.OrganizationId, name);
         await store.AddAsync(item, cancellationToken);
         await store.SaveChangesAsync(cancellationToken);
         return new CreateProducibleItemResult(item.Id, item.Name, item.IsActive);

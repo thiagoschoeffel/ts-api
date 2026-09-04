@@ -14,7 +14,7 @@ public interface ICatalogOfferStore
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }
 
-public sealed class CreateOfferHandler(ICatalogOfferStore store)
+public sealed class CreateOfferHandler(ICatalogOfferStore store, IOrganizationContext organizationContext)
 {
     public async Task<CreateOfferResult> HandleAsync(
         CreateOfferCommand command,
@@ -26,7 +26,7 @@ public sealed class CreateOfferHandler(ICatalogOfferStore store)
             throw new ConflictException("Já existe uma oferta com esse nome.");
         }
 
-        var offer = CatalogOffer.Create(name, command.FulfillmentMode);
+        var offer = CatalogOffer.Create(organizationContext.OrganizationId, name, command.FulfillmentMode);
         await store.AddAsync(offer, cancellationToken);
         await store.SaveChangesAsync(cancellationToken);
         return new CreateOfferResult(offer.Id, offer.Name, offer.FulfillmentMode, offer.IsActive);
