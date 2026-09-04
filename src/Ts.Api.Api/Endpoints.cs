@@ -23,6 +23,16 @@ public static class Endpoints
             .WithName("RegisterFrozenProduction");
         api.MapPost("/orders/{orderId:guid}/confirmation", ConfirmOrderAsync)
             .WithName("ConfirmOrder");
+        api.MapPost("/orders", CreateOrderAsync)
+            .WithName("CreateOrder");
+        api.MapPut("/orders/{orderId:guid}", EditOrderAsync)
+            .WithName("EditOrder");
+        api.MapGet("/orders/{orderId:guid}", GetOrderAsync)
+            .WithName("GetOrder");
+        api.MapPut("/daily-capacities/{operationalDate}", ConfigureDailyCapacityAsync)
+            .WithName("ConfigureDailyCapacity");
+        api.MapGet("/daily-capacities/{operationalDate}", GetDailyCapacityAsync)
+            .WithName("GetDailyCapacity");
 
         return endpoints;
     }
@@ -117,6 +127,105 @@ public static class Endpoints
             cancellationToken);
         return TypedResults.Ok(result);
     }
+
+    private static async Task<IResult> CreateOrderAsync(
+        HttpContext httpContext,
+        CreateOrderRequest request,
+        CreateOrderHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var idempotencyKeyResult = ReadIdempotencyKey(httpContext);
+        if (idempotencyKeyResult.Error is not null)
+        {
+            return idempotencyKeyResult.Error;
+        }
+
+        var result = await handler.HandleAsync(
+            new CreateOrderCommand(
+                request.CustomerId,
+                request.OperationalDate,
+                request.Items.Select(MapOrderItem).ToArray(),
+                idempotencyKeyResult.Value!),
+            cancellationToken);
+        return TypedResults.Created($"/api/orders/{result.Id}", result);
+    }
+
+    private static async Task<IResult> EditOrderAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        EditOrderRequest request,
+        EditOrderHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var idempotencyKeyResult = ReadIdempotencyKey(httpContext);
+        if (idempotencyKeyResult.Error is not null)
+        {
+            return idempotencyKeyResult.Error;
+        }
+
+        var result = await handler.HandleAsync(
+            new EditOrderCommand(
+                orderId,
+                request.CustomerId,
+                request.OperationalDate,
+                request.Items.Select(MapOrderItem).ToArray(),
+                request.ExpectedVersion,
+                idempotencyKeyResult.Value!),
+            cancellationToken);
+        return TypedResults.Ok(result);
+    }
+
+    private static async Task<IResult> GetOrderAsync(
+        Guid orderId,
+        GetOrderHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(orderId, cancellationToken));
+
+    private static async Task<IResult> ConfigureDailyCapacityAsync(
+        DateOnly operationalDate,
+        HttpContext httpContext,
+        ConfigureDailyCapacityRequest request,
+        ConfigureDailyCapacityHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var idempotencyKeyResult = ReadIdempotencyKey(httpContext);
+        if (idempotencyKeyResult.Error is not null)
+        {
+            return idempotencyKeyResult.Error;
+        }
+
+        var result = await handler.HandleAsync(
+            new ConfigureDailyCapacityCommand(
+                operationalDate,
+                request.TotalUnits,
+                request.ExpectedVersion,
+                idempotencyKeyResult.Value!),
+            cancellationToken);
+        return TypedResults.Ok(result);
+    }
+
+    private static async Task<IResult> GetDailyCapacityAsync(
+        DateOnly operationalDate,
+        GetDailyCapacityHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(operationalDate, cancellationToken));
+
+    private static OrderItemInput MapOrderItem(OrderItemRequest item) => new(
+        item.OfferId,
+        item.Quantity,
+        item.UnitPrice,
+        item.FrozenConfigurationId);
+
+    private static (string? Value, IResult? Error) ReadIdempotencyKey(HttpContext httpContext)
+    {
+        var value = httpContext.Request.Headers["Idempotency-Key"].ToString();
+        return string.IsNullOrWhiteSpace(value)
+            ? (null, TypedResults.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["Idempotency-Key"] = ["O cabeçalho Idempotency-Key é obrigatório."],
+            }))
+            : (value, null);
+    }
 }
 
 public sealed record CreateOfferRequest(string Name, OfferFulfillmentMode FulfillmentMode);
@@ -138,3 +247,22 @@ public sealed record RegisterFrozenProductionRequest(
     Guid ActorId);
 
 public sealed record ConfirmOrderRequest(Guid ActorId, long ExpectedVersion);
+
+public sealed record CreateOrderRequest(
+    Guid CustomerId,
+    DateOnly OperationalDate,
+    IReadOnlyCollection<OrderItemRequest> Items);
+
+public sealed record EditOrderRequest(
+    Guid CustomerId,
+    DateOnly OperationalDate,
+    IReadOnlyCollection<OrderItemRequest> Items,
+    long ExpectedVersion);
+
+public sealed record OrderItemRequest(
+    Guid OfferId,
+    int Quantity,
+    decimal? UnitPrice = null,
+    Guid? FrozenConfigurationId = null);
+
+public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);

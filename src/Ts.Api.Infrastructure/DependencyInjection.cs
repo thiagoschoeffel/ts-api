@@ -24,6 +24,10 @@ public static class DependencyInjection
         services.AddScoped<IFrozenConfigurationStore, FrozenConfigurationStore>();
         services.AddScoped<IFrozenProductionStore, FrozenProductionStore>();
         services.AddScoped<IOrderConfirmationStore, OrderConfirmationStore>();
+        services.AddScoped<OrderManagementStore>();
+        services.AddScoped<IOrderManagementStore>(provider => provider.GetRequiredService<OrderManagementStore>());
+        services.AddScoped<IDailyCapacityManagementStore>(
+            provider => provider.GetRequiredService<OrderManagementStore>());
         return services;
     }
 }

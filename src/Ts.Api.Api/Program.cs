@@ -23,6 +23,11 @@ builder.Services.AddScoped<CreateProducibleItemHandler>();
 builder.Services.AddScoped<CreateFrozenConfigurationHandler>();
 builder.Services.AddScoped<RegisterFrozenProductionHandler>();
 builder.Services.AddScoped<ConfirmOrderHandler>();
+builder.Services.AddScoped<CreateOrderHandler>();
+builder.Services.AddScoped<EditOrderHandler>();
+builder.Services.AddScoped<GetOrderHandler>();
+builder.Services.AddScoped<ConfigureDailyCapacityHandler>();
+builder.Services.AddScoped<GetDailyCapacityHandler>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

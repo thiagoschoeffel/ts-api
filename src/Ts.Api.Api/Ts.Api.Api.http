@@ -27,6 +27,16 @@ Content-Type: application/json
   "name": "Estrogonofe de frango"
 }
 
+### Oferta diária para compor um Pedido misto
+
+POST {{Ts_Api_HostAddress}}/api/catalog/offers
+Content-Type: application/json
+
+{
+  "name": "Almoço do dia",
+  "fulfillmentMode": "DailyProduction"
+}
+
 ### Substitua os IDs pelos recursos criados acima
 
 POST {{Ts_Api_HostAddress}}/api/frozen-stock/configurations
@@ -54,7 +64,70 @@ Idempotency-Key: frozen-production-2026-09-04-01
   "actorId": "00000000-0000-0000-0000-000000000001"
 }
 
-### Substitua o ID por um Pedido aberto persistido e informe sua versão atual
+### Configure a capacidade; na primeira gravação, a versão esperada é zero
+
+PUT {{Ts_Api_HostAddress}}/api/daily-capacities/2026-09-05
+Content-Type: application/json
+Idempotency-Key: capacity-2026-09-05-01
+
+{
+  "totalUnits": 40,
+  "expectedVersion": 0
+}
+
+### Consulte capacidade total, reservada, disponível e versão
+
+GET {{Ts_Api_HostAddress}}/api/daily-capacities/2026-09-05
+Accept: application/json
+
+### Crie o Pedido; substitua os IDs pelas ofertas/configuração criadas acima
+
+POST {{Ts_Api_HostAddress}}/api/orders
+Content-Type: application/json
+Idempotency-Key: order-create-2026-09-05-01
+
+{
+  "customerId": "00000000-0000-0000-0000-000000000002",
+  "operationalDate": "2026-09-05",
+  "items": [
+    {
+      "offerId": "00000000-0000-0000-0000-000000000000",
+      "quantity": 2,
+      "unitPrice": 18.00
+    },
+    {
+      "offerId": "00000000-0000-0000-0000-000000000000",
+      "quantity": 3,
+      "frozenConfigurationId": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}
+
+### Consulte o Pedido e use a versão devolvida nas escritas seguintes
+
+GET {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000
+Accept: application/json
+
+### A edição substitui o rascunho inteiro e exige versão otimista
+
+PUT {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000
+Content-Type: application/json
+Idempotency-Key: order-edit-2026-09-05-01
+
+{
+  "customerId": "00000000-0000-0000-0000-000000000002",
+  "operationalDate": "2026-09-05",
+  "expectedVersion": 0,
+  "items": [
+    {
+      "offerId": "00000000-0000-0000-0000-000000000000",
+      "quantity": 2,
+      "unitPrice": 18.00
+    }
+  ]
+}
+
+### Confirme usando a versão atual devolvida pela criação, edição ou consulta
 
 POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/confirmation
 Content-Type: application/json

@@ -173,8 +173,13 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
             .ThenBy(item => item.Id)
             .ToListAsync(cancellationToken);
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken) =>
-        database.SaveChangesAsync(cancellationToken);
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        MarkNewEffectsAsAdded<FrozenStockAllocation>();
+        MarkNewEffectsAsAdded<FrozenStockMovement>();
+        MarkNewEffectsAsAdded<OrderCharge>();
+        return database.SaveChangesAsync(cancellationToken);
+    }
 
     private IQueryable<Order> OrdersWithConfirmationGraph() =>
         database.Orders
@@ -182,6 +187,15 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
             .Include("_frozenAllocations")
             .Include("_charges")
             .AsSplitQuery();
+
+    private void MarkNewEffectsAsAdded<TEntity>() where TEntity : class
+    {
+        foreach (var entry in database.ChangeTracker.Entries<TEntity>()
+                     .Where(entry => entry.State == EntityState.Modified))
+        {
+            entry.State = EntityState.Added;
+        }
+    }
 
     private static bool IsRetryableConcurrencyConflict(Exception exception) => exception switch
     {
@@ -192,6 +206,118 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
             || (postgresException.SqlState == PostgresErrorCodes.UniqueViolation
                 && postgresException.ConstraintName
                     == "IX_orders_OrganizationId_ConfirmationIdempotencyKey"),
+        _ when exception.InnerException is not null =>
+            IsRetryableConcurrencyConflict(exception.InnerException),
+        _ => false,
+    };
+}
+
+public sealed class OrderManagementStore(AppDbContext database) :
+    IOrderManagementStore,
+    IDailyCapacityManagementStore
+{
+    public async Task<T> ExecuteSerializableAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            try
+            {
+                var result = await operation(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception) when (IsRetryableConcurrencyConflict(exception))
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                database.ChangeTracker.Clear();
+                if (attempt == maximumAttempts)
+                {
+                    throw new ConflictException(
+                        "A operação conflitou com outra gravação. Recarregue os dados e tente novamente.");
+                }
+            }
+        }
+
+        throw new InvalidOperationException("A operação terminou sem resultado.");
+    }
+
+    public Task<Order?> FindByCreationKeyAsync(
+        string idempotencyKey,
+        CancellationToken cancellationToken) => OrdersWithItems().SingleOrDefaultAsync(
+        item => item.CreationIdempotencyKey == idempotencyKey,
+        cancellationToken);
+
+    public Task<Order?> FindByModificationKeyAsync(
+        string idempotencyKey,
+        CancellationToken cancellationToken) => OrdersWithItems().SingleOrDefaultAsync(
+        item => item.LastModificationIdempotencyKey == idempotencyKey,
+        cancellationToken);
+
+    public Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken) =>
+        OrdersWithItems().SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+
+    public Task<CatalogOffer?> FindActiveOfferAsync(
+        Guid offerId,
+        CancellationToken cancellationToken) => database.CatalogOffers.SingleOrDefaultAsync(
+        item => item.Id == offerId && item.IsActive,
+        cancellationToken);
+
+    public Task<FrozenConfiguration?> FindActiveFrozenConfigurationAsync(
+        Guid configurationId,
+        CancellationToken cancellationToken) => database.FrozenConfigurations.SingleOrDefaultAsync(
+        item => item.Id == configurationId && item.IsActive,
+        cancellationToken);
+
+    public Task<ProducibleItem?> FindActiveProducibleItemAsync(
+        Guid producibleItemId,
+        CancellationToken cancellationToken) => database.ProducibleItems.SingleOrDefaultAsync(
+        item => item.Id == producibleItemId && item.IsActive,
+        cancellationToken);
+
+    public async Task AddAsync(Order order, CancellationToken cancellationToken) =>
+        await database.Orders.AddAsync(order, cancellationToken);
+
+    public void ReplaceItems(
+        IReadOnlyCollection<OrderItem> previousItems,
+        IReadOnlyCollection<OrderItem> replacementItems)
+    {
+        database.OrderItems.RemoveRange(previousItems);
+        database.OrderItems.AddRange(replacementItems);
+    }
+
+    public Task<DailyCapacity?> FindAsync(
+        DateOnly operationalDate,
+        CancellationToken cancellationToken) => database.DailyCapacities.SingleOrDefaultAsync(
+        item => item.OperationalDate == operationalDate,
+        cancellationToken);
+
+    public Task<DailyCapacity?> FindByConfigurationKeyAsync(
+        string idempotencyKey,
+        CancellationToken cancellationToken) => database.DailyCapacities.SingleOrDefaultAsync(
+        item => item.LastConfigurationIdempotencyKey == idempotencyKey,
+        cancellationToken);
+
+    public async Task AddAsync(DailyCapacity capacity, CancellationToken cancellationToken) =>
+        await database.DailyCapacities.AddAsync(capacity, cancellationToken);
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken) =>
+        database.SaveChangesAsync(cancellationToken);
+
+    private IQueryable<Order> OrdersWithItems() => database.Orders.Include("_items");
+
+    private static bool IsRetryableConcurrencyConflict(Exception exception) => exception switch
+    {
+        DbUpdateConcurrencyException => true,
+        PostgresException postgresException =>
+            postgresException.SqlState == PostgresErrorCodes.SerializationFailure
+            || postgresException.SqlState == PostgresErrorCodes.DeadlockDetected
+            || postgresException.SqlState == PostgresErrorCodes.UniqueViolation,
         _ when exception.InnerException is not null =>
             IsRetryableConcurrencyConflict(exception.InnerException),
         _ => false,

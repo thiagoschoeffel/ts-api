@@ -14,7 +14,10 @@ public sealed class OrderItem : ITenantOwned
         OfferFulfillmentMode fulfillmentMode,
         int quantity,
         decimal unitPrice,
-        Guid? frozenConfigurationId)
+        Guid? frozenConfigurationId,
+        string offerName = "",
+        string? producibleItemName = null,
+        string? frozenPresentation = null)
     {
         if (offerId == Guid.Empty)
         {
@@ -54,6 +57,9 @@ public sealed class OrderItem : ITenantOwned
         Quantity = quantity;
         UnitPrice = unitPrice;
         FrozenConfigurationId = frozenConfigurationId;
+        OfferName = offerName.Trim();
+        ProducibleItemName = producibleItemName?.Trim();
+        FrozenPresentation = frozenPresentation?.Trim();
     }
 
     public Guid Id { get; private set; }
@@ -64,5 +70,8 @@ public sealed class OrderItem : ITenantOwned
     public int Quantity { get; private set; }
     public decimal UnitPrice { get; private set; }
     public Guid? FrozenConfigurationId { get; private set; }
+    public string OfferName { get; private set; } = string.Empty;
+    public string? ProducibleItemName { get; private set; }
+    public string? FrozenPresentation { get; private set; }
     public decimal Total => UnitPrice * Quantity;
 }

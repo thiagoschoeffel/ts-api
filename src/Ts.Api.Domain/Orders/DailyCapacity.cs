@@ -6,7 +6,11 @@ public sealed class DailyCapacity : ITenantOwned
 {
     private DailyCapacity() { }
 
-    private DailyCapacity(Guid organizationId, DateOnly operationalDate, int totalUnits)
+    private DailyCapacity(
+        Guid organizationId,
+        DateOnly operationalDate,
+        int totalUnits,
+        string idempotencyKey)
     {
         if (organizationId == Guid.Empty)
         {
@@ -22,6 +26,7 @@ public sealed class DailyCapacity : ITenantOwned
         OrganizationId = organizationId;
         OperationalDate = operationalDate;
         TotalUnits = totalUnits;
+        LastConfigurationIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
     }
 
     public Guid Id { get; private set; }
@@ -29,10 +34,37 @@ public sealed class DailyCapacity : ITenantOwned
     public DateOnly OperationalDate { get; private set; }
     public int TotalUnits { get; private set; }
     public int ReservedUnits { get; private set; }
+    public long Version { get; private set; }
+    public string LastConfigurationIdempotencyKey { get; private set; } = string.Empty;
     public int AvailableUnits => TotalUnits - ReservedUnits;
 
-    public static DailyCapacity Create(Guid organizationId, DateOnly operationalDate, int totalUnits) =>
-        new(organizationId, operationalDate, totalUnits);
+    public static DailyCapacity Create(
+        Guid organizationId,
+        DateOnly operationalDate,
+        int totalUnits,
+        string? idempotencyKey = null) =>
+        new(
+            organizationId,
+            operationalDate,
+            totalUnits,
+            idempotencyKey is null ? $"internal-{Guid.NewGuid():N}" : idempotencyKey);
+
+    public void Configure(int totalUnits, string idempotencyKey)
+    {
+        if (totalUnits <= 0)
+        {
+            throw new DomainException("A capacidade total deve ser positiva.");
+        }
+
+        if (totalUnits < ReservedUnits)
+        {
+            throw new DomainException("A capacidade total não pode ser menor que a capacidade já reservada.");
+        }
+
+        TotalUnits = totalUnits;
+        LastConfigurationIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        Version++;
+    }
 
     public void Reserve(int quantity)
     {
@@ -47,5 +79,17 @@ public sealed class DailyCapacity : ITenantOwned
         }
 
         ReservedUnits += quantity;
+        Version++;
+    }
+
+    private static string NormalizeIdempotencyKey(string idempotencyKey)
+    {
+        var normalized = idempotencyKey?.Trim() ?? string.Empty;
+        if (normalized.Length is 0 or > 200)
+        {
+            throw new DomainException("A chave de idempotência deve possuir entre 1 e 200 caracteres.");
+        }
+
+        return normalized;
     }
 }

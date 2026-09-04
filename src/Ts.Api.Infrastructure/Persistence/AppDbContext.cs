@@ -185,6 +185,8 @@ public sealed class AppDbContext(
                 .HasForeignKey(item => item.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.Property(item => item.ConfirmationIdempotencyKey).HasMaxLength(200);
+            configuration.Property(item => item.CreationIdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.LastModificationIdempotencyKey).HasMaxLength(200);
             configuration.Property(item => item.Version).IsConcurrencyToken();
             configuration.Ignore(item => item.Items);
             configuration.Ignore(item => item.FrozenAllocations);
@@ -195,7 +197,7 @@ public sealed class AppDbContext(
                 .WithOne()
                 .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
                 .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Cascade);
             configuration.HasMany<FrozenStockAllocation>("_frozenAllocations")
                 .WithOne()
                 .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
@@ -211,6 +213,10 @@ public sealed class AppDbContext(
             configuration.Navigation("_charges").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.HasIndex(item => new { item.OrganizationId, item.ConfirmationIdempotencyKey })
                 .IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.CreationIdempotencyKey })
+                .IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.LastModificationIdempotencyKey })
+                .IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
@@ -220,6 +226,9 @@ public sealed class AppDbContext(
             configuration.HasKey(item => item.Id);
             configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
             configuration.Property(item => item.UnitPrice).HasPrecision(12, 2);
+            configuration.Property(item => item.OfferName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.ProducibleItemName).HasMaxLength(160);
+            configuration.Property(item => item.FrozenPresentation).HasMaxLength(120);
             configuration.Ignore(item => item.Total);
             configuration.HasOne<CatalogOffer>()
                 .WithMany()
@@ -277,7 +286,16 @@ public sealed class AppDbContext(
                 .HasForeignKey(item => item.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.Ignore(item => item.AvailableUnits);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.Property(item => item.LastConfigurationIdempotencyKey)
+                .HasMaxLength(200)
+                .IsRequired();
             configuration.HasIndex(item => new { item.OrganizationId, item.OperationalDate }).IsUnique();
+            configuration.HasIndex(item => new
+            {
+                item.OrganizationId,
+                item.LastConfigurationIdempotencyKey,
+            }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
     }
@@ -315,8 +333,10 @@ public sealed class AppDbContext(
                 throw new InvalidOperationException("Não é permitido gravar dados de outra organização.");
             }
 
+            var organizationProperty = entry.Property(nameof(ITenantOwned.OrganizationId));
             if (entry.State == EntityState.Modified
-                && entry.Property(nameof(ITenantOwned.OrganizationId)).IsModified)
+                && organizationProperty.IsModified
+                && !Equals(organizationProperty.OriginalValue, organizationProperty.CurrentValue))
             {
                 throw new InvalidOperationException("A organização de uma entidade não pode ser alterada.");
             }

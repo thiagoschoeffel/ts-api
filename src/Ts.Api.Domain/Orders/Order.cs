@@ -11,13 +11,18 @@ public sealed class Order : ITenantOwned
 
     private Order() { }
 
-    private Order(Guid organizationId, Guid customerId, DateOnly operationalDate)
+    private Order(
+        Guid organizationId,
+        Guid customerId,
+        DateOnly operationalDate,
+        string creationIdempotencyKey)
     {
         Id = Guid.NewGuid();
         OrganizationId = organizationId;
         CustomerId = customerId;
         OperationalDate = operationalDate;
         Status = OrderStatus.Open;
+        CreationIdempotencyKey = creationIdempotencyKey;
     }
 
     public Guid Id { get; private set; }
@@ -29,6 +34,8 @@ public sealed class Order : ITenantOwned
     public Guid? ConfirmedBy { get; private set; }
     public DateTimeOffset? ConfirmedAt { get; private set; }
     public string? ConfirmationIdempotencyKey { get; private set; }
+    public string CreationIdempotencyKey { get; private set; } = string.Empty;
+    public string? LastModificationIdempotencyKey { get; private set; }
     public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
     public IReadOnlyCollection<FrozenStockAllocation> FrozenAllocations => _frozenAllocations.AsReadOnly();
     public IReadOnlyCollection<OrderCharge> Charges => _charges.AsReadOnly();
@@ -41,7 +48,8 @@ public sealed class Order : ITenantOwned
         Guid organizationId,
         Guid customerId,
         DateOnly operationalDate,
-        IReadOnlyCollection<OrderItemDefinition> items)
+        IReadOnlyCollection<OrderItemDefinition> items,
+        string? creationIdempotencyKey = null)
     {
         if (organizationId == Guid.Empty)
         {
@@ -58,20 +66,41 @@ public sealed class Order : ITenantOwned
             throw new DomainException("O pedido deve possuir ao menos um item.");
         }
 
-        var order = new Order(organizationId, customerId, operationalDate);
-        foreach (var item in items)
-        {
-            order._items.Add(new OrderItem(
-                organizationId,
-                order.Id,
-                item.OfferId,
-                item.FulfillmentMode,
-                item.Quantity,
-                item.UnitPrice,
-                item.FrozenConfigurationId));
-        }
+        var normalizedKey = creationIdempotencyKey is null
+            ? $"internal-{Guid.NewGuid():N}"
+            : NormalizeIdempotencyKey(creationIdempotencyKey);
+        var order = new Order(organizationId, customerId, operationalDate, normalizedKey);
+        order.ReplaceItems(items);
 
         return order;
+    }
+
+    public void EditDraft(
+        Guid customerId,
+        DateOnly operationalDate,
+        IReadOnlyCollection<OrderItemDefinition> items,
+        string idempotencyKey)
+    {
+        if (Status != OrderStatus.Open)
+        {
+            throw new DomainException("Somente um pedido aberto pode ser alterado.");
+        }
+
+        if (customerId == Guid.Empty)
+        {
+            throw new DomainException("O cliente é obrigatório.");
+        }
+
+        if (items.Count == 0)
+        {
+            throw new DomainException("O pedido deve possuir ao menos um item.");
+        }
+
+        CustomerId = customerId;
+        OperationalDate = operationalDate;
+        ReplaceItems(items);
+        LastModificationIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        Version++;
     }
 
     public FrozenStockAllocation AllocateFrozenStock(OrderItem item, Guid frozenLotId, int quantity)
@@ -146,6 +175,36 @@ public sealed class Order : ITenantOwned
         ConfirmationIdempotencyKey = normalizedKey;
         Version++;
     }
+
+    private void ReplaceItems(IReadOnlyCollection<OrderItemDefinition> items)
+    {
+        _items.Clear();
+        foreach (var item in items)
+        {
+            _items.Add(new OrderItem(
+                OrganizationId,
+                Id,
+                item.OfferId,
+                item.FulfillmentMode,
+                item.Quantity,
+                item.UnitPrice,
+                item.FrozenConfigurationId,
+                item.OfferName,
+                item.ProducibleItemName,
+                item.FrozenPresentation));
+        }
+    }
+
+    private static string NormalizeIdempotencyKey(string idempotencyKey)
+    {
+        var normalized = idempotencyKey?.Trim() ?? string.Empty;
+        if (normalized.Length is 0 or > 200)
+        {
+            throw new DomainException("A chave de idempotência deve possuir entre 1 e 200 caracteres.");
+        }
+
+        return normalized;
+    }
 }
 
 public sealed record OrderItemDefinition(
@@ -153,4 +212,7 @@ public sealed record OrderItemDefinition(
     OfferFulfillmentMode FulfillmentMode,
     int Quantity,
     decimal UnitPrice,
-    Guid? FrozenConfigurationId = null);
+    Guid? FrozenConfigurationId = null,
+    string OfferName = "",
+    string? ProducibleItemName = null,
+    string? FrozenPresentation = null);

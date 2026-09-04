@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Ts.Api.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using Ts.Api.Infrastructure.Persistence;
 namespace Ts.Api.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260904224001_AddOrderDraftAndDailyCapacityManagement")]
+    partial class AddOrderDraftAndDailyCapacityManagement
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -645,7 +648,7 @@ namespace Ts.Api.Infrastructure.Persistence.Migrations
                         .WithMany("_items")
                         .HasForeignKey("OrganizationId", "OrderId")
                         .HasPrincipalKey("OrganizationId", "Id")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
