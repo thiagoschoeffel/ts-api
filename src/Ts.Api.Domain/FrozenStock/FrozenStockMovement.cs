@@ -65,4 +65,30 @@ public sealed class FrozenStockMovement : ITenantOwned
             occurredAt,
             null);
     }
+
+    internal static FrozenStockMovement CreateOrderExit(
+        Guid organizationId,
+        Guid frozenLotId,
+        Guid orderId,
+        Guid orderItemId,
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt)
+    {
+        if (quantity <= 0)
+        {
+            throw new DomainException("A quantidade da movimentação deve ser positiva.");
+        }
+
+        return new FrozenStockMovement(
+            Guid.NewGuid(),
+            organizationId,
+            frozenLotId,
+            StockMovementType.OrderExit,
+            quantity,
+            $"Order:{orderId:N}:{orderItemId:N}",
+            actorId,
+            occurredAt,
+            null);
+    }
 }

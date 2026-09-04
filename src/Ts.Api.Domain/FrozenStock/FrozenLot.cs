@@ -105,4 +105,36 @@ public sealed class FrozenLot : ITenantOwned
         && ManufacturedOn == manufacturedOn
         && ProducedQuantity == producedQuantity
         && RecordedBy == recordedBy;
+
+    public void RemoveForOrder(
+        Guid orderId,
+        Guid orderItemId,
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt)
+    {
+        if (orderId == Guid.Empty || orderItemId == Guid.Empty)
+        {
+            throw new DomainException("O pedido e o item do pedido são obrigatórios na saída de estoque.");
+        }
+
+        if (actorId == Guid.Empty)
+        {
+            throw new DomainException("O responsável pela saída de estoque é obrigatório.");
+        }
+
+        if (quantity <= 0 || quantity > Balance)
+        {
+            throw new DomainException("O lote não possui saldo suficiente para a saída solicitada.");
+        }
+
+        _movements.Add(FrozenStockMovement.CreateOrderExit(
+            OrganizationId,
+            Id,
+            orderId,
+            orderItemId,
+            quantity,
+            actorId,
+            occurredAt));
+    }
 }

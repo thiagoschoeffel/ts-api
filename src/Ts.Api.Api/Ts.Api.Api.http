@@ -53,3 +53,14 @@ Idempotency-Key: frozen-production-2026-09-04-01
   "producedQuantity": 24,
   "actorId": "00000000-0000-0000-0000-000000000001"
 }
+
+### Substitua o ID por um Pedido aberto persistido e informe sua versão atual
+
+POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/confirmation
+Content-Type: application/json
+Idempotency-Key: order-confirmation-2026-09-04-01
+
+{
+  "actorId": "00000000-0000-0000-0000-000000000001",
+  "expectedVersion": 0
+}

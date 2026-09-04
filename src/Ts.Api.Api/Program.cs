@@ -4,6 +4,7 @@ using Ts.Api.Api;
 using Ts.Api.Application.Catalog;
 using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
+using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Infrastructure;
 using Ts.Api.Infrastructure.Persistence;
@@ -21,6 +22,7 @@ builder.Services.AddScoped<CreateOfferHandler>();
 builder.Services.AddScoped<CreateProducibleItemHandler>();
 builder.Services.AddScoped<CreateFrozenConfigurationHandler>();
 builder.Services.AddScoped<RegisterFrozenProductionHandler>();
+builder.Services.AddScoped<ConfirmOrderHandler>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

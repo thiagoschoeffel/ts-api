@@ -1,9 +1,14 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Ts.Api.Application.Catalog;
+using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
+using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
+using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
@@ -100,4 +105,95 @@ public sealed class FrozenProductionStore(AppDbContext database) : IFrozenProduc
             return existing;
         }
     }
+}
+
+public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfirmationStore
+{
+    public async Task<T> ExecuteSerializableAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+            try
+            {
+                var result = await operation(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception) when (IsRetryableConcurrencyConflict(exception))
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                database.ChangeTracker.Clear();
+
+                if (attempt == maximumAttempts)
+                {
+                    throw new ConflictException(
+                        "A confirmação conflitou com outra operação. Recarregue os dados e tente novamente.");
+                }
+            }
+        }
+
+        throw new InvalidOperationException("O fluxo de confirmação terminou sem resultado.");
+    }
+
+    public Task<Order?> FindByConfirmationKeyAsync(
+        string idempotencyKey,
+        CancellationToken cancellationToken) =>
+        OrdersWithConfirmationGraph()
+            .SingleOrDefaultAsync(
+                item => item.ConfirmationIdempotencyKey == idempotencyKey,
+                cancellationToken);
+
+    public Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken) =>
+        OrdersWithConfirmationGraph()
+            .SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+
+    public Task<DailyCapacity?> FindDailyCapacityAsync(
+        DateOnly operationalDate,
+        CancellationToken cancellationToken) =>
+        database.DailyCapacities.SingleOrDefaultAsync(
+            item => item.OperationalDate == operationalDate,
+            cancellationToken);
+
+    public async Task<IReadOnlyList<FrozenLot>> FindSellableLotsAsync(
+        Guid frozenConfigurationId,
+        DateOnly sellableOn,
+        CancellationToken cancellationToken) =>
+        await database.FrozenLots
+            .Include("_movements")
+            .Where(item => item.FrozenConfigurationId == frozenConfigurationId
+                && item.ExpiresOn >= sellableOn)
+            .OrderBy(item => item.ExpiresOn)
+            .ThenBy(item => item.ManufacturedOn)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken) =>
+        database.SaveChangesAsync(cancellationToken);
+
+    private IQueryable<Order> OrdersWithConfirmationGraph() =>
+        database.Orders
+            .Include("_items")
+            .Include("_frozenAllocations")
+            .Include("_charges")
+            .AsSplitQuery();
+
+    private static bool IsRetryableConcurrencyConflict(Exception exception) => exception switch
+    {
+        DbUpdateConcurrencyException => true,
+        PostgresException postgresException =>
+            postgresException.SqlState == PostgresErrorCodes.SerializationFailure
+            || postgresException.SqlState == PostgresErrorCodes.DeadlockDetected
+            || (postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+                && postgresException.ConstraintName
+                    == "IX_orders_OrganizationId_ConfirmationIdempotencyKey"),
+        _ when exception.InnerException is not null =>
+            IsRetryableConcurrencyConflict(exception.InnerException),
+        _ => false,
+    };
 }

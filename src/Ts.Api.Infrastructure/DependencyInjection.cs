@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Ts.Api.Application.Catalog;
 using Ts.Api.Application.FrozenStock;
+using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Infrastructure.Persistence;
 
@@ -22,6 +23,7 @@ public static class DependencyInjection
         services.AddScoped<IProducibleItemStore, ProducibleItemStore>();
         services.AddScoped<IFrozenConfigurationStore, FrozenConfigurationStore>();
         services.AddScoped<IFrozenProductionStore, FrozenProductionStore>();
+        services.AddScoped<IOrderConfirmationStore, OrderConfirmationStore>();
         return services;
     }
 }

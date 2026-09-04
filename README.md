@@ -17,7 +17,8 @@ Esta primeira fatia estabelece:
 - fontes autoritativas mínimas de Oferta e Item Produzível;
 - criação de Configuração de Congelado com apresentação e preço variável próprios;
 - entrada atômica de lote + `EntradaProducao`, protegida por `Idempotency-Key`;
-- contrato inicial de confirmação de Pedido;
+- primeira fatia autoritativa de confirmação de Pedido, com status, versão otimista, capacidade diária, cobrança e alocação FEFO de congelados;
+- confirmação transacional serializável e idempotente, com movimentos e alocações rastreáveis por PedidoItem;
 - health checks de processo e banco;
 - testes unitários das invariantes já implementadas;
 - execução local e imagem de deploy com Docker.
@@ -29,9 +30,12 @@ POST /api/catalog/offers
 POST /api/production/items
 POST /api/frozen-stock/configurations
 POST /api/frozen-stock/production-entries
+POST /api/orders/{orderId}/confirmation
 ```
 
-A entrada de produção exige `Idempotency-Key`. O tenant nunca é recebido no payload: ele é obtido da claim autenticada `organization_id`. A configuração de um provedor de identidade e as políticas de autorização ainda serão adicionadas antes de qualquer uso operacional real.
+A entrada de produção e a confirmação de Pedido exigem `Idempotency-Key`. A confirmação também exige `ExpectedVersion` e rejeita alterações concorrentes. O tenant nunca é recebido no payload: ele é obtido da claim autenticada `organization_id`. A configuração de um provedor de identidade e as políticas de autorização ainda serão adicionadas antes de qualquer uso operacional real.
+
+O endpoint de confirmação opera sobre Pedidos abertos e capacidades já persistidos. Os casos de uso públicos para criar o rascunho autoritativo do Pedido e configurar a capacidade diária entram na próxima fatia, antes da integração com os remotes. Créditos de plano e crédito financeiro também serão incorporados à mesma transação quando suas fontes autoritativas forem introduzidas.
 
 Em `Development`, a organização Sabor Santè é selecionada por uma configuração do servidor para manter os fluxos locais utilizáveis enquanto o provedor de identidade não foi escolhido. Esse fallback não funciona fora do ambiente de desenvolvimento; em produção, chamadas a `/api` sem uma identidade autenticada contendo `organization_id` recebem `401`.
 
@@ -69,13 +73,16 @@ dotnet build --configuration Release
 - O nome e a composição pertencem ao Item Produzível; regras comuns de venda pertencem à Oferta genérica de Congelados; apresentação e preço variável pertencem à `FrozenConfiguration`.
 - Dados de negócio implementam o contrato tenant-owned. Filtros globais do EF Core isolam leituras, `SaveChanges` rejeita escritas de outro tenant e chaves estrangeiras compostas impedem referências cruzadas entre organizações.
 - Unicidades de negócio e idempotência são locais à organização. A migration multi-tenant associa os dados existentes ao tenant inicial Sabor Santè.
+- A confirmação de Pedido usa transação `Serializable`, versão otimista e chave idempotente por Organização; itens congelados são alocados por validade, fabricação e ID estável.
 - Impressão será um adapter de infraestrutura separado e nunca alterará lote, estoque ou Pedido.
 
 ## Sequência de implementação
 
-1. revisar o scaffold à luz dos fluxos e contratos de interface consolidados — em andamento;
-2. modelar as fontes autoritativas mínimas de Oferta e Item Produzível;
-3. revisar ou substituir a migration inicial;
-4. implementar habilitação de congelado e entrada atômica de lote + `ProductionEntry`, com idempotência;
-5. implementar a confirmação transacional do Pedido e a alocação FEFO;
-6. integrar o frontend já consolidado por meio de adapters, sem transportar interfaces de mock para a API.
+1. revisar o scaffold à luz dos fluxos e contratos de interface consolidados — concluído para as fatias implementadas;
+2. modelar as fontes autoritativas mínimas de Oferta e Item Produzível — concluído;
+3. revisar a migration inicial e estabelecer a fundação multi-tenant — concluído;
+4. implementar habilitação de congelado e entrada atômica de lote + `ProductionEntry`, com idempotência — concluído;
+5. implementar a primeira fatia transacional de confirmação do Pedido, com capacidade, cobrança e alocação FEFO — concluído;
+6. adicionar criação autoritativa do Pedido e configuração da capacidade diária;
+7. incorporar créditos de plano, crédito financeiro, composição e restrições à transação de confirmação;
+8. integrar o frontend consolidado por meio de adapters, sem transportar interfaces de mock para a API.

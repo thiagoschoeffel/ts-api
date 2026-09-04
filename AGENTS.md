@@ -31,3 +31,11 @@
 - Nunca grave segredos no repositório; documente variáveis em `.env.example`.
 - Execute `dotnet test` e `dotnet build --configuration Release` após alterações.
 - Mudanças de persistência exigem migration versionada.
+
+## Execução por épicos
+
+- O checklist, a ordem e os critérios de aceite ficam em `../ts-host/docs/ROADMAP.md`.
+- A execução solicitada de um épico desse roadmap autoriza explicitamente os commits e o push que compõem sua Definition of Done.
+- Antes de iniciar, verifique o estado Git de todos os repositórios afetados e preserve mudanças que não pertençam ao épico.
+- Ao concluir, valide, atualize a documentação, crie um commit convencional e coeso por repositório afetado e faça push das branches correntes.
+- Um épico só pode ser marcado como concluído após todos os pushes; falha de commit ou push mantém o épico em andamento.

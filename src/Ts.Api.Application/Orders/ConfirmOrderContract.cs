@@ -1,3 +1,5 @@
+using Ts.Api.Domain.Orders;
+
 namespace Ts.Api.Application.Orders;
 
 public sealed record ConfirmOrderCommand(
@@ -8,7 +10,7 @@ public sealed record ConfirmOrderCommand(
 
 public sealed record ConfirmOrderResult(
     Guid OrderId,
-    string Status,
+    OrderStatus Status,
     long Version,
     IReadOnlyCollection<FrozenAllocation> FrozenAllocations);
 

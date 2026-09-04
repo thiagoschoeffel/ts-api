@@ -1,5 +1,6 @@
 using Ts.Api.Application.Catalog;
 using Ts.Api.Application.FrozenStock;
+using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
@@ -20,6 +21,8 @@ public static class Endpoints
             .WithName("CreateFrozenConfiguration");
         api.MapPost("/frozen-stock/production-entries", RegisterFrozenProductionAsync)
             .WithName("RegisterFrozenProduction");
+        api.MapPost("/orders/{orderId:guid}/confirmation", ConfirmOrderAsync)
+            .WithName("ConfirmOrder");
 
         return endpoints;
     }
@@ -88,6 +91,32 @@ public static class Endpoints
             cancellationToken);
         return TypedResults.Created($"/api/frozen-stock/lots/{result.FrozenLotId}", result);
     }
+
+    private static async Task<IResult> ConfirmOrderAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        ConfirmOrderRequest request,
+        ConfirmOrderHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var idempotencyKey = httpContext.Request.Headers["Idempotency-Key"].ToString();
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["Idempotency-Key"] = ["O cabeçalho Idempotency-Key é obrigatório."],
+            });
+        }
+
+        var result = await handler.HandleAsync(
+            new ConfirmOrderCommand(
+                orderId,
+                request.ActorId,
+                idempotencyKey,
+                request.ExpectedVersion),
+            cancellationToken);
+        return TypedResults.Ok(result);
+    }
 }
 
 public sealed record CreateOfferRequest(string Name, OfferFulfillmentMode FulfillmentMode);
@@ -107,3 +136,5 @@ public sealed record RegisterFrozenProductionRequest(
     DateOnly ManufacturedOn,
     int ProducedQuantity,
     Guid ActorId);
+
+public sealed record ConfirmOrderRequest(Guid ActorId, long ExpectedVersion);

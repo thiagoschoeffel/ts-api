@@ -4,6 +4,7 @@ using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.Common;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Organizations;
+using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
@@ -20,6 +21,11 @@ public sealed class AppDbContext(
     public DbSet<FrozenConfiguration> FrozenConfigurations => Set<FrozenConfiguration>();
     public DbSet<FrozenLot> FrozenLots => Set<FrozenLot>();
     public DbSet<FrozenStockMovement> FrozenStockMovements => Set<FrozenStockMovement>();
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+    public DbSet<FrozenStockAllocation> FrozenStockAllocations => Set<FrozenStockAllocation>();
+    public DbSet<OrderCharge> OrderCharges => Set<OrderCharge>();
+    public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -166,6 +172,112 @@ public sealed class AppDbContext(
             configuration.Property(item => item.Reason).HasMaxLength(500);
             configuration.Ignore(item => item.SignedQuantity);
             configuration.HasIndex(item => new { item.OrganizationId, item.FrozenLotId, item.OccurredAt });
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<Order>(configuration =>
+        {
+            configuration.ToTable("orders");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.Property(item => item.ConfirmationIdempotencyKey).HasMaxLength(200);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.Ignore(item => item.Items);
+            configuration.Ignore(item => item.FrozenAllocations);
+            configuration.Ignore(item => item.Charges);
+            configuration.Ignore(item => item.DailyCapacityUnits);
+            configuration.Ignore(item => item.TotalAmount);
+            configuration.HasMany<OrderItem>("_items")
+                .WithOne()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<FrozenStockAllocation>("_frozenAllocations")
+                .WithOne()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<OrderCharge>("_charges")
+                .WithOne()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.Navigation("_items").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_frozenAllocations").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_charges").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.HasIndex(item => new { item.OrganizationId, item.ConfirmationIdempotencyKey })
+                .IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrderItem>(configuration =>
+        {
+            configuration.ToTable("order_items");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.UnitPrice).HasPrecision(12, 2);
+            configuration.Ignore(item => item.Total);
+            configuration.HasOne<CatalogOffer>()
+                .WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.OfferId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<FrozenConfiguration>()
+                .WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.FrozenConfigurationId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<FrozenStockAllocation>(configuration =>
+        {
+            configuration.ToTable("frozen_stock_allocations");
+            configuration.HasKey(item => item.Id);
+            configuration.HasOne<OrderItem>()
+                .WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<FrozenConfiguration>()
+                .WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.FrozenConfigurationId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<FrozenLot>()
+                .WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.FrozenLotId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.OrderItemId, item.FrozenLotId })
+                .IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrderCharge>(configuration =>
+        {
+            configuration.ToTable("order_charges");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Amount).HasPrecision(12, 2);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<DailyCapacity>(configuration =>
+        {
+            configuration.ToTable("daily_capacities");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.Ignore(item => item.AvailableUnits);
+            configuration.HasIndex(item => new { item.OrganizationId, item.OperationalDate }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
     }
