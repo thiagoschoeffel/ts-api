@@ -247,3 +247,17 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 10. integrar os fluxos autoritativos de Pedido e capacidade — concluído.
 11. integrar Produção, Embalagem e o adapter Zebra/ZPL — concluído.
 12. integrar Clientes, Planos, Créditos e Financeiro — concluído.
+
+## Observabilidade e deploy
+
+A API emite logs JSON com escopos de correlação, devolve `X-Correlation-Id`,
+centraliza erros inesperados com um `errorId` seguro e aceita falhas autenticadas
+do frontend em `POST /api/telemetry/client-errors`. Liveness, readiness com
+PostgreSQL e métricas Prometheus ficam em `/health/live`, `/health/ready` e
+`/metrics`.
+
+CI executa testes, build Release, aplica toda a cadeia de migrations em
+PostgreSQL 17 real, constrói a imagem e guarda o publish imutável. Em deploy,
+defina `ConnectionStrings__Database` e execute `./scripts/apply-migrations.sh`
+uma única vez antes das novas réplicas. O procedimento completo e o rollback
+estão em `../ts-host/docs/OPERACAO_V1.md`.

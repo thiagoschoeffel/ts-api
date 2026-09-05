@@ -6,7 +6,7 @@ using Ts.Api.Domain.Common;
 
 namespace Ts.Api.Api;
 
-public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsService) : IExceptionHandler
+public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsService, ILogger<ApiExceptionHandler> logger) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
@@ -19,11 +19,17 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
             ConflictException => StatusCodes.Status409Conflict,
             DbUpdateException => StatusCodes.Status409Conflict,
             DomainException => StatusCodes.Status422UnprocessableEntity,
-            _ => 0,
+            _ => StatusCodes.Status500InternalServerError,
         };
-        if (statusCode == 0)
+        var errorId = Guid.NewGuid().ToString("N");
+        if (statusCode >= StatusCodes.Status500InternalServerError)
         {
-            return false;
+            logger.LogError(exception, "Erro não tratado {ErrorId} na correlação {CorrelationId}", errorId, httpContext.TraceIdentifier);
+        }
+        else
+        {
+            logger.LogWarning("Requisição rejeitada com {StatusCode}, erro {ErrorId} e correlação {CorrelationId}: {ExceptionType}",
+                statusCode, errorId, httpContext.TraceIdentifier, exception.GetType().Name);
         }
 
         httpContext.Response.StatusCode = statusCode;
@@ -38,11 +44,19 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
                 {
                     StatusCodes.Status404NotFound => "Recurso não encontrado",
                     StatusCodes.Status409Conflict => "Conflito de estado",
-                    _ => "Regra de negócio inválida",
+                    StatusCodes.Status422UnprocessableEntity => "Regra de negócio inválida",
+                    _ => "Erro interno",
                 },
-                Detail = exception is DbUpdateException
+                Detail = statusCode == StatusCodes.Status500InternalServerError
+                    ? "Ocorreu um erro inesperado. Use os identificadores de erro e correlação ao solicitar suporte."
+                    : exception is DbUpdateException
                     ? "A operação conflita com o estado persistido. Recarregue os dados e tente novamente."
                     : exception.Message,
+                Extensions =
+                {
+                    ["errorId"] = errorId,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                },
             },
         });
     }

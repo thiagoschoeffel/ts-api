@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: ts_api_ci
+          POSTGRES_USER: ts_api
+          POSTGRES_PASSWORD: ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ts_api -d ts_api_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      ConnectionStrings__Database: Host=localhost;Port=5432;Database=ts_api_ci;Username=ts_api;Password=ci-only
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore
+      - run: dotnet test --no-restore --disable-build-servers -m:1
+      - run: dotnet build --configuration Release --no-restore --disable-build-servers -m:1
+      - run: dotnet publish src/Ts.Api.Api --configuration Release --no-restore --output artifacts/api
+      - run: dotnet tool restore
+      - name: Apply migrations to PostgreSQL
+        run: dotnet tool run dotnet-ef database update --project src/Ts.Api.Infrastructure --startup-project src/Ts.Api.Api --no-build --configuration Release
+      - name: Build deploy image
+        run: docker build --tag ts-api:${{ github.sha }} .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ts-api-${{ github.sha }}
+          path: artifacts/api
+          retention-days: 14

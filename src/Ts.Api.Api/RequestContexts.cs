@@ -43,9 +43,7 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
             return;
         }
 
-        var correlationId = ReadCorrelationId(httpContext);
-        httpContext.TraceIdentifier = correlationId;
-        httpContext.Response.Headers["X-Correlation-Id"] = correlationId;
+        var correlationId = httpContext.TraceIdentifier;
 
         if (httpContext.User.Identity?.IsAuthenticated != true)
         {
@@ -95,14 +93,6 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
         requestContext.Set(requestedOrganizationId, platformUser.Id, correlationId);
         httpContext.Items[AuthorizationPolicies.MembershipRoleItem] = membership!.Role;
         await next(httpContext);
-    }
-
-    private static string ReadCorrelationId(HttpContext context)
-    {
-        var requested = context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
-        return !string.IsNullOrWhiteSpace(requested) && requested.Length <= 100
-            ? requested
-            : context.TraceIdentifier;
     }
 
     private static Task Forbid(HttpContext context, string detail) => Results.Problem(

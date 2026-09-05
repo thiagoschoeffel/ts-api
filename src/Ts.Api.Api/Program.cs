@@ -24,6 +24,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<ApiMetrics>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
     .AllowAnyHeader()
@@ -112,6 +113,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 var app = builder.Build();
 
+app.UseMiddleware<RequestObservabilityMiddleware>();
 app.UseExceptionHandler();
 app.UseCors();
 app.UseAuthentication();
@@ -135,9 +137,32 @@ app.MapGet("/health/ready", async (AppDbContext database, CancellationToken canc
         : Results.Problem("O PostgreSQL não está disponível.", statusCode: StatusCodes.Status503ServiceUnavailable))
     .WithName("Readiness");
 
+app.MapGet("/metrics", (ApiMetrics metrics) => Results.Text(metrics.Snapshot(), "text/plain; version=0.0.4"))
+    .WithName("Metrics");
+
+app.MapPost("/api/telemetry/client-errors", (ClientErrorReport report, HttpRequestContext context,
+    ILogger<Program> logger) =>
+{
+    logger.LogError("Erro do frontend {ErrorName} em {Source}: {Message}",
+        ClientErrorReport.Sanitize(report.Name, 120), ClientErrorReport.Sanitize(report.Source, 200),
+        ClientErrorReport.Sanitize(report.Message, 1000));
+    return Results.Accepted();
+})
+    .RequireAuthorization(AuthorizationPolicies.Read)
+    .WithName("ReportClientError");
+
 app.MapApplicationEndpoints();
 app.MapWhatsAppWebhooks();
 
 app.Run();
 
 public partial class Program;
+
+public sealed record ClientErrorReport(string Name, string Message, string Source)
+{
+    public static string Sanitize(string? value, int maximumLength)
+    {
+        var sanitized = string.IsNullOrWhiteSpace(value) ? "unknown" : value.ReplaceLineEndings(" ");
+        return sanitized.Length <= maximumLength ? sanitized : sanitized[..maximumLength];
+    }
+}
