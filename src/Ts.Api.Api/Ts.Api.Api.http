@@ -138,6 +138,41 @@ Idempotency-Key: frozen-production-2026-09-04-01
   "producedQuantity": 24,
 }
 
+### Consulte configurações, saldos vendáveis e vencimentos
+
+GET {{Ts_Api_HostAddress}}/api/frozen-stock
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
+Accept: application/json
+
+### Consulte a validade autoritativa antes de registrar a entrada
+
+GET {{Ts_Api_HostAddress}}/api/frozen-stock/expiration?manufacturedOn=2026-09-04
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
+Accept: application/json
+
+### Consulte o lote criado e seu histórico de movimentos
+
+GET {{Ts_Api_HostAddress}}/api/frozen-stock/lots/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
+Accept: application/json
+
+### Registre ajuste manual; use quantidade negativa para retirar unidades
+
+POST {{Ts_Api_HostAddress}}/api/frozen-stock/lots/00000000-0000-0000-0000-000000000000/movements
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
+Content-Type: application/json
+Idempotency-Key: frozen-adjustment-2026-09-04-01
+
+{
+  "type": "ManualAdjustment",
+  "quantity": -2,
+  "reason": "<p>Diferença encontrada na conferência física.</p>"
+}
+
 ### Configure a capacidade; na primeira gravação, a versão esperada é zero
 
 PUT {{Ts_Api_HostAddress}}/api/daily-capacities/2026-09-05

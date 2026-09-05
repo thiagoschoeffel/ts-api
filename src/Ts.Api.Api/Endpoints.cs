@@ -31,9 +31,21 @@ public static class Endpoints
         api.MapPost("/frozen-stock/configurations", CreateFrozenConfigurationAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
             .WithName("CreateFrozenConfiguration");
+        api.MapPut("/frozen-stock/configurations/{configurationId:guid}", UpdateFrozenConfigurationAsync)
+            .RequireAuthorization(AuthorizationPolicies.Administer)
+            .WithName("UpdateFrozenConfiguration");
+        api.MapGet("/frozen-stock", GetFrozenStockManagementAsync)
+            .WithName("GetFrozenStockManagement");
+        api.MapGet("/frozen-stock/expiration", CalculateFrozenExpiration)
+            .WithName("CalculateFrozenExpiration");
+        api.MapGet("/frozen-stock/lots/{lotId:guid}", GetFrozenLotAsync)
+            .WithName("GetFrozenLot");
         api.MapPost("/frozen-stock/production-entries", RegisterFrozenProductionAsync)
             .RequireAuthorization(AuthorizationPolicies.Operate)
             .WithName("RegisterFrozenProduction");
+        api.MapPost("/frozen-stock/lots/{lotId:guid}/movements", RegisterFrozenMovementAsync)
+            .RequireAuthorization(AuthorizationPolicies.Operate)
+            .WithName("RegisterFrozenMovement");
         api.MapPost("/orders/{orderId:guid}/confirmation", ConfirmOrderAsync)
             .RequireAuthorization(AuthorizationPolicies.Operate)
             .WithName("ConfirmOrder");
@@ -162,6 +174,53 @@ public static class Endpoints
                 idempotencyKey),
             cancellationToken);
         return TypedResults.Created($"/api/frozen-stock/lots/{result.FrozenLotId}", result);
+    }
+
+    private static async Task<IResult> GetFrozenStockManagementAsync(
+        GetFrozenStockManagementHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(cancellationToken));
+
+    private static IResult CalculateFrozenExpiration(
+        DateOnly manufacturedOn,
+        CalculateFrozenExpirationHandler handler) => TypedResults.Ok(handler.Handle(manufacturedOn));
+
+    private static async Task<IResult> GetFrozenLotAsync(
+        Guid lotId,
+        GetFrozenLotHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(lotId, cancellationToken));
+
+    private static async Task<IResult> UpdateFrozenConfigurationAsync(
+        Guid configurationId,
+        UpdateFrozenConfigurationRequest request,
+        UpdateFrozenConfigurationHandler handler,
+        CancellationToken cancellationToken)
+    {
+        _ = await handler.HandleAsync(
+            new UpdateFrozenConfigurationCommand(configurationId, request.UnitPrice, request.IsActive),
+            cancellationToken);
+        return TypedResults.NoContent();
+    }
+
+    private static async Task<IResult> RegisterFrozenMovementAsync(
+        Guid lotId,
+        HttpContext httpContext,
+        RegisterFrozenMovementRequest request,
+        RegisterFrozenMovementHandler handler,
+        ICurrentUserContext currentUser,
+        CancellationToken cancellationToken)
+    {
+        var key = ReadIdempotencyKey(httpContext);
+        if (key.Error is not null) return key.Error;
+        var movementId = await handler.HandleAsync(new RegisterFrozenMovementCommand(
+            lotId,
+            request.Type,
+            request.Quantity,
+            request.Reason,
+            currentUser.UserId,
+            key.Value!), cancellationToken);
+        return TypedResults.Ok(new RegisterFrozenMovementResponse(movementId));
     }
 
     private static async Task<IResult> ConfirmOrderAsync(
@@ -408,6 +467,15 @@ public sealed record RegisterFrozenProductionRequest(
     Guid FrozenConfigurationId,
     DateOnly ManufacturedOn,
     int ProducedQuantity);
+
+public sealed record UpdateFrozenConfigurationRequest(decimal UnitPrice, bool IsActive);
+
+public sealed record RegisterFrozenMovementRequest(
+    StockMovementType Type,
+    int Quantity,
+    string Reason);
+
+public sealed record RegisterFrozenMovementResponse(Guid MovementId);
 
 public sealed record ConfirmOrderRequest(
     long ExpectedVersion,

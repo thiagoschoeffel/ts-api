@@ -8,6 +8,9 @@ public interface IFrozenProductionStore
     Task<FrozenConfiguration?> FindActiveConfigurationAsync(
         Guid id,
         CancellationToken cancellationToken);
+    Task<Ts.Api.Domain.Production.ProducibleItem?> FindProducibleItemAsync(
+        Guid id,
+        CancellationToken cancellationToken);
     Task<FrozenLot?> FindByIdempotencyKeyAsync(
         string idempotencyKey,
         CancellationToken cancellationToken);
@@ -32,8 +35,10 @@ public sealed class RegisterFrozenProductionHandler(
             return ResultForMatchingRequest(existing, command);
         }
 
-        _ = await store.FindActiveConfigurationAsync(command.FrozenConfigurationId, cancellationToken)
+        var configuration = await store.FindActiveConfigurationAsync(command.FrozenConfigurationId, cancellationToken)
             ?? throw new ResourceNotFoundException("A configuração de congelado não existe ou está inativa.");
+        var producible = await store.FindProducibleItemAsync(configuration.ProducibleItemId, cancellationToken)
+            ?? throw new ResourceNotFoundException("O item produzível da configuração não existe.");
 
         var candidate = FrozenLot.RegisterProduction(
             organizationContext.OrganizationId,
@@ -42,7 +47,9 @@ public sealed class RegisterFrozenProductionHandler(
             command.ProducedQuantity,
             command.ActorId,
             timeProvider.GetUtcNow(),
-            idempotencyKey);
+            idempotencyKey,
+            producible.Name,
+            configuration.Presentation);
         var persisted = await store.AddOrGetByIdempotencyKeyAsync(candidate, cancellationToken);
         return ResultForMatchingRequest(persisted, command);
     }

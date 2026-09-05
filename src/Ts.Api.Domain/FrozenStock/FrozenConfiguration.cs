@@ -94,4 +94,15 @@ public sealed class FrozenConfiguration : ITenantOwned
 
     public void Deactivate() => IsActive = false;
     public void Activate() => IsActive = true;
+
+    public void UpdateSalesSettings(decimal unitPrice, bool isActive)
+    {
+        if (unitPrice < 0)
+        {
+            throw new DomainException("O preço unitário não pode ser negativo.");
+        }
+
+        UnitPrice = unitPrice;
+        IsActive = isActive;
+    }
 }

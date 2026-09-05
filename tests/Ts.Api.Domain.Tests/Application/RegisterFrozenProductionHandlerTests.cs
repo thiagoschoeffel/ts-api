@@ -81,6 +81,13 @@ public sealed class RegisterFrozenProductionHandlerTests
             CancellationToken cancellationToken) =>
             Task.FromResult(configuration.Id == id && configuration.IsActive ? configuration : null);
 
+        public Task<Ts.Api.Domain.Production.ProducibleItem?> FindProducibleItemAsync(
+            Guid id,
+            CancellationToken cancellationToken) => Task.FromResult<Ts.Api.Domain.Production.ProducibleItem?>(
+                id == configuration.ProducibleItemId
+                    ? Ts.Api.Domain.Production.ProducibleItem.Create(OrganizationId, "Estrogonofe")
+                    : null);
+
         public Task<FrozenLot?> FindByIdempotencyKeyAsync(
             string idempotencyKey,
             CancellationToken cancellationToken) =>

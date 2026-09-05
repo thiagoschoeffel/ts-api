@@ -15,7 +15,8 @@ public sealed class FrozenStockMovement : ITenantOwned
         string origin,
         Guid actorId,
         DateTimeOffset occurredAt,
-        string? reason)
+        string? reason,
+        string? idempotencyKey = null)
     {
         Id = id;
         OrganizationId = organizationId;
@@ -26,6 +27,7 @@ public sealed class FrozenStockMovement : ITenantOwned
         ActorId = actorId;
         OccurredAt = occurredAt;
         Reason = reason;
+        IdempotencyKey = idempotencyKey;
     }
 
     public Guid Id { get; private set; }
@@ -37,6 +39,7 @@ public sealed class FrozenStockMovement : ITenantOwned
     public Guid ActorId { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
     public string? Reason { get; private set; }
+    public string? IdempotencyKey { get; private set; }
 
     public int SignedQuantity => Type is StockMovementType.OrderExit or StockMovementType.ExpirationDisposal
         ? -Quantity
@@ -110,5 +113,43 @@ public sealed class FrozenStockMovement : ITenantOwned
         return new FrozenStockMovement(
             Guid.NewGuid(), organizationId, frozenLotId, StockMovementType.OrderReversal,
             quantity, $"Order:{orderId:N}:{orderItemId:N}", actorId, occurredAt, reason.Trim());
+    }
+
+    internal static FrozenStockMovement CreateManualAdjustment(
+        Guid organizationId,
+        Guid frozenLotId,
+        int signedQuantity,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string reason,
+        string idempotencyKey)
+    {
+        if (signedQuantity == 0 || string.IsNullOrWhiteSpace(reason))
+        {
+            throw new DomainException("Quantidade e motivo são obrigatórios no ajuste de estoque.");
+        }
+
+        return new FrozenStockMovement(
+            Guid.NewGuid(), organizationId, frozenLotId, StockMovementType.ManualAdjustment,
+            signedQuantity, "ManualAdjustment", actorId, occurredAt, reason.Trim(), idempotencyKey);
+    }
+
+    internal static FrozenStockMovement CreateExpirationDisposal(
+        Guid organizationId,
+        Guid frozenLotId,
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string reason,
+        string idempotencyKey)
+    {
+        if (quantity <= 0 || string.IsNullOrWhiteSpace(reason))
+        {
+            throw new DomainException("Quantidade e motivo são obrigatórios no descarte.");
+        }
+
+        return new FrozenStockMovement(
+            Guid.NewGuid(), organizationId, frozenLotId, StockMovementType.ExpirationDisposal,
+            quantity, "ExpirationDisposal", actorId, occurredAt, reason.Trim(), idempotencyKey);
     }
 }

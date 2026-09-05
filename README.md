@@ -20,6 +20,9 @@ Esta primeira fatia estabelece:
 - fontes autoritativas mínimas de Oferta e Item Produzível;
 - criação de Configuração de Congelado com apresentação e preço variável próprios;
 - entrada atômica de lote + `EntradaProducao`, protegida por `Idempotency-Key`;
+- consultas de gestão para configurações, estoque vendável, vencimentos, lote e movimentos;
+- ajuste manual e descarte transacionais, auditáveis e idempotentes, sem edição direta de saldo;
+- snapshot de nome e apresentação gravado no lote para manter etiquetas históricas estáveis;
 - primeira fatia autoritativa de confirmação de Pedido, com status, versão otimista, capacidade diária, cobrança e alocação FEFO de congelados;
 - confirmação transacional serializável e idempotente, com movimentos e alocações rastreáveis por PedidoItem;
 - criação, edição e consulta de Pedidos abertos com itens diários e congelados validados contra fontes autoritativas;
@@ -49,7 +52,12 @@ POST /api/customers/{customerId}/dietary-restrictions
 POST /api/plans/acquisitions
 POST /api/financial-credits
 POST /api/frozen-stock/configurations
+PUT  /api/frozen-stock/configurations/{configurationId}
+GET  /api/frozen-stock
+GET  /api/frozen-stock/expiration?manufacturedOn={date}
+GET  /api/frozen-stock/lots/{lotId}
 POST /api/frozen-stock/production-entries
+POST /api/frozen-stock/lots/{lotId}/movements
 POST /api/orders
 PUT  /api/orders/{orderId}
 GET  /api/orders/{orderId}
@@ -66,7 +74,7 @@ Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token pr
 
 Leituras aceitam qualquer associação ativa. Operações de Pedido e estoque aceitam `Owner`, `Administrator` e `Operator`; `DeliveryDriver` fica restrito a leituras até a integração logística do E13. Configuração de Catálogo, Produção, capacidade, Planos, restrições e Financeiro exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
 
-A entrada de produção, a criação/edição do Pedido, a configuração de capacidade, a confirmação e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento e cancelamento também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
+A entrada de produção, o ajuste/descarte de congelados, a criação/edição do Pedido, a configuração de capacidade, a confirmação e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento e cancelamento também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
 
 No Pedido, a modalidade vem da Oferta ativa. Itens diários exigem o Item Produzível escolhido e recebem o preço informado para o rascunho; itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa. Na confirmação, a versão mais recente da composição é consolidada no Pedido e validada contra as restrições do cliente. Esses snapshots permanecem estáveis mesmo que a composição mude depois. O `CustomerId` continua sendo uma identidade externa obrigatória até o domínio autoritativo de Clientes do E12.
 
@@ -153,4 +161,5 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 6. adicionar criação autoritativa do Pedido e configuração da capacidade diária — concluído;
 7. incorporar créditos de plano, crédito financeiro, composição e restrições à transação de confirmação — concluído;
 8. implementar cancelamento, reagendamento e reversões dos efeitos autoritativos — concluído;
-9. integrar o frontend consolidado por meio de adapters, sem transportar interfaces de mock para a API.
+9. integrar a Gestão de Congelados por meio de um adapter HTTP tipado e autenticado — concluído;
+10. integrar os fluxos autoritativos de Pedido e capacidade.

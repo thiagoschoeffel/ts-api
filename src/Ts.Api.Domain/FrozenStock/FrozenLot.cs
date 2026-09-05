@@ -16,7 +16,9 @@ public sealed class FrozenLot : ITenantOwned
         int producedQuantity,
         Guid recordedBy,
         DateTimeOffset recordedAt,
-        string idempotencyKey)
+        string idempotencyKey,
+        string producibleNameSnapshot,
+        string presentationSnapshot)
     {
         Id = id;
         OrganizationId = organizationId;
@@ -27,6 +29,8 @@ public sealed class FrozenLot : ITenantOwned
         RecordedBy = recordedBy;
         RecordedAt = recordedAt;
         IdempotencyKey = idempotencyKey;
+        ProducibleNameSnapshot = producibleNameSnapshot;
+        PresentationSnapshot = presentationSnapshot;
     }
 
     public Guid Id { get; private set; }
@@ -38,6 +42,8 @@ public sealed class FrozenLot : ITenantOwned
     public Guid RecordedBy { get; private set; }
     public DateTimeOffset RecordedAt { get; private set; }
     public string IdempotencyKey { get; private set; } = string.Empty;
+    public string ProducibleNameSnapshot { get; private set; } = string.Empty;
+    public string PresentationSnapshot { get; private set; } = string.Empty;
     public IReadOnlyCollection<FrozenStockMovement> Movements => _movements.AsReadOnly();
     public int Balance => _movements.Sum(movement => movement.SignedQuantity);
     public bool IsSellableOn(DateOnly date) => Balance > 0 && ExpiresOn >= date;
@@ -49,7 +55,9 @@ public sealed class FrozenLot : ITenantOwned
         int producedQuantity,
         Guid recordedBy,
         DateTimeOffset recordedAt,
-        string idempotencyKey)
+        string idempotencyKey,
+        string producibleNameSnapshot = "Item produzível",
+        string presentationSnapshot = "Apresentação")
     {
         if (organizationId == Guid.Empty)
         {
@@ -76,6 +84,12 @@ public sealed class FrozenLot : ITenantOwned
             throw new DomainException("A chave de idempotência deve possuir entre 1 e 200 caracteres.");
         }
 
+        if (string.IsNullOrWhiteSpace(producibleNameSnapshot)
+            || string.IsNullOrWhiteSpace(presentationSnapshot))
+        {
+            throw new DomainException("O nome e a apresentação vigentes são obrigatórios no snapshot do lote.");
+        }
+
         var lot = new FrozenLot(
             Guid.NewGuid(),
             organizationId,
@@ -84,7 +98,9 @@ public sealed class FrozenLot : ITenantOwned
             producedQuantity,
             recordedBy,
             recordedAt,
-            idempotencyKey.Trim());
+            idempotencyKey.Trim(),
+            producibleNameSnapshot.Trim(),
+            presentationSnapshot.Trim());
 
         lot._movements.Add(FrozenStockMovement.CreateProductionEntry(
             organizationId,
@@ -165,5 +181,61 @@ public sealed class FrozenLot : ITenantOwned
 
         _movements.Add(FrozenStockMovement.CreateOrderReversal(
             OrganizationId, Id, orderId, orderItemId, quantity, actorId, occurredAt, reason));
+    }
+
+    public FrozenStockMovement AdjustStock(
+        int signedQuantity,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string reason,
+        string idempotencyKey)
+    {
+        ValidateManualMovement(actorId, reason, idempotencyKey);
+        if (signedQuantity == 0 || Balance + signedQuantity < 0)
+        {
+            throw new DomainException("O ajuste deve ser diferente de zero e não pode deixar o saldo negativo.");
+        }
+
+        var movement = FrozenStockMovement.CreateManualAdjustment(
+            OrganizationId, Id, signedQuantity, actorId, occurredAt, reason, idempotencyKey.Trim());
+        _movements.Add(movement);
+        return movement;
+    }
+
+    public FrozenStockMovement DisposeExpiredStock(
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string reason,
+        string idempotencyKey)
+    {
+        ValidateManualMovement(actorId, reason, idempotencyKey);
+        if (quantity <= 0 || quantity > Balance)
+        {
+            throw new DomainException("O descarte deve ser positivo e não pode superar o saldo físico.");
+        }
+
+        var movement = FrozenStockMovement.CreateExpirationDisposal(
+            OrganizationId, Id, quantity, actorId, occurredAt, reason, idempotencyKey.Trim());
+        _movements.Add(movement);
+        return movement;
+    }
+
+    private static void ValidateManualMovement(Guid actorId, string reason, string idempotencyKey)
+    {
+        if (actorId == Guid.Empty)
+        {
+            throw new DomainException("O responsável pela movimentação é obrigatório.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 500)
+        {
+            throw new DomainException("O motivo da movimentação deve possuir entre 1 e 500 caracteres.");
+        }
+
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Trim().Length > 200)
+        {
+            throw new DomainException("A chave de idempotência deve possuir entre 1 e 200 caracteres.");
+        }
     }
 }
