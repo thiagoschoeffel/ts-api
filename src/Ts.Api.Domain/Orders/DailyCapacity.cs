@@ -82,6 +82,17 @@ public sealed class DailyCapacity : ITenantOwned
         Version++;
     }
 
+    public void Release(int quantity)
+    {
+        if (quantity <= 0 || quantity > ReservedUnits)
+        {
+            throw new DomainException("A quantidade liberada deve ser positiva e não exceder a capacidade reservada.");
+        }
+
+        ReservedUnits -= quantity;
+        Version++;
+    }
+
     private static string NormalizeIdempotencyKey(string idempotencyKey)
     {
         var normalized = idempotencyKey?.Trim() ?? string.Empty;

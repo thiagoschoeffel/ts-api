@@ -46,6 +46,12 @@ public sealed class FinancialCreditMovement : ITenantOwned
         Create(organizationId, customerId, FinancialCreditMovementType.Consumed,
             amount, "Consumo na confirmação do pedido", actorId, occurredAt, orderId);
 
+    public static FinancialCreditMovement Reverse(
+        Guid organizationId, Guid customerId, Guid orderId, decimal amount,
+        Guid actorId, DateTimeOffset occurredAt) =>
+        Create(organizationId, customerId, FinancialCreditMovementType.Reversed,
+            amount, "Estorno pelo cancelamento do pedido", actorId, occurredAt, orderId);
+
     private static FinancialCreditMovement Create(
         Guid organizationId, Guid customerId, FinancialCreditMovementType type,
         decimal amount, string reason, Guid actorId, DateTimeOffset occurredAt, Guid? orderId)

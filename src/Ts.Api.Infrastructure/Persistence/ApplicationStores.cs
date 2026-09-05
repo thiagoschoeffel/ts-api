@@ -256,6 +256,96 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
     };
 }
 
+public sealed class OrderLifecycleStore(AppDbContext database) : IOrderLifecycleStore
+{
+    public async Task<T> ExecuteSerializableAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await operation(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception) when (IsRetryableConcurrencyConflict(exception))
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                database.ChangeTracker.Clear();
+                if (attempt == maximumAttempts)
+                    throw new ConflictException("A operação de ciclo do pedido conflitou com outra gravação. Tente novamente.");
+            }
+        }
+
+        throw new InvalidOperationException("A operação de ciclo do pedido terminou sem resultado.");
+    }
+
+    public Task<OrderLifecycleEvent?> FindLifecycleEventAsync(
+        string idempotencyKey, CancellationToken cancellationToken) =>
+        database.OrderLifecycleEvents.SingleOrDefaultAsync(
+            item => item.IdempotencyKey == idempotencyKey, cancellationToken);
+
+    public Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken) =>
+        database.Orders
+            .Include("_items")
+            .Include("_frozenAllocations")
+            .Include("_charges")
+            .Include("_planCreditAllocations")
+            .Include("_confirmationAudits")
+            .Include("_lifecycleEvents")
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+
+    public Task<DailyCapacity?> FindDailyCapacityAsync(
+        DateOnly operationalDate, CancellationToken cancellationToken) =>
+        database.DailyCapacities.SingleOrDefaultAsync(
+            item => item.OperationalDate == operationalDate, cancellationToken);
+
+    public Task<FrozenLot?> FindFrozenLotAsync(
+        Guid frozenLotId, CancellationToken cancellationToken) =>
+        database.FrozenLots.Include("_movements")
+            .SingleOrDefaultAsync(item => item.Id == frozenLotId, cancellationToken);
+
+    public Task<PlanAcquisition?> FindPlanAcquisitionAsync(
+        Guid acquisitionId, CancellationToken cancellationToken) =>
+        database.PlanAcquisitions.Include("_movements")
+            .SingleOrDefaultAsync(item => item.Id == acquisitionId, cancellationToken);
+
+    public void AddFinancialCreditMovement(FinancialCreditMovement movement) =>
+        database.FinancialCreditMovements.Add(movement);
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        MarkNewEffectsAsAdded<FrozenStockMovement>();
+        MarkNewEffectsAsAdded<PlanCreditMovement>();
+        MarkNewEffectsAsAdded<OrderLifecycleEvent>();
+        return database.SaveChangesAsync(cancellationToken);
+    }
+
+    private void MarkNewEffectsAsAdded<TEntity>() where TEntity : class
+    {
+        foreach (var entry in database.ChangeTracker.Entries<TEntity>()
+                     .Where(entry => entry.State == EntityState.Modified))
+            entry.State = EntityState.Added;
+    }
+
+    private static bool IsRetryableConcurrencyConflict(Exception exception) => exception switch
+    {
+        DbUpdateConcurrencyException => true,
+        PostgresException postgresException =>
+            postgresException.SqlState == PostgresErrorCodes.SerializationFailure
+            || postgresException.SqlState == PostgresErrorCodes.DeadlockDetected
+            || postgresException.SqlState == PostgresErrorCodes.UniqueViolation,
+        _ when exception.InnerException is not null => IsRetryableConcurrencyConflict(exception.InnerException),
+        _ => false,
+    };
+}
+
 public sealed class OrderManagementStore(AppDbContext database) :
     IOrderManagementStore,
     IDailyCapacityManagementStore

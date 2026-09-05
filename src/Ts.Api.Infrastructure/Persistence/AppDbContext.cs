@@ -38,6 +38,7 @@ public sealed class AppDbContext(
     public DbSet<OrderItemComponent> OrderItemComponents => Set<OrderItemComponent>();
     public DbSet<OrderPlanCreditAllocation> OrderPlanCreditAllocations => Set<OrderPlanCreditAllocation>();
     public DbSet<OrderConfirmationAudit> OrderConfirmationAudits => Set<OrderConfirmationAudit>();
+    public DbSet<OrderLifecycleEvent> OrderLifecycleEvents => Set<OrderLifecycleEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -208,6 +209,7 @@ public sealed class AppDbContext(
             configuration.Ignore(item => item.ComponentSnapshots);
             configuration.Ignore(item => item.PlanCreditAllocations);
             configuration.Ignore(item => item.ConfirmationAudits);
+            configuration.Ignore(item => item.LifecycleEvents);
             configuration.HasMany<OrderItem>("_items")
                 .WithOne()
                 .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
@@ -232,12 +234,16 @@ public sealed class AppDbContext(
             configuration.HasMany<OrderConfirmationAudit>("_confirmationAudits")
                 .WithOne().HasForeignKey(item => new { item.OrganizationId, item.OrderId })
                 .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<OrderLifecycleEvent>("_lifecycleEvents")
+                .WithOne().HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             configuration.Navigation("_items").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_frozenAllocations").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_charges").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_componentSnapshots").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_planCreditAllocations").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_confirmationAudits").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_lifecycleEvents").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.HasIndex(item => new { item.OrganizationId, item.ConfirmationIdempotencyKey })
                 .IsUnique();
             configuration.HasIndex(item => new { item.OrganizationId, item.CreationIdempotencyKey })
@@ -469,6 +475,18 @@ public sealed class AppDbContext(
             configuration.Property(item => item.FinancialCreditApplied).HasPrecision(12, 2);
             configuration.Property(item => item.AmountDue).HasPrecision(12, 2);
             configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrderLifecycleEvent>(configuration =>
+        {
+            configuration.ToTable("order_lifecycle_events");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.FinancialCreditReversed).HasPrecision(12, 2);
+            configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.OrderId, item.OccurredAt });
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
     }

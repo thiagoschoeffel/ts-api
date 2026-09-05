@@ -4,6 +4,7 @@ using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
+using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Api;
@@ -24,6 +25,12 @@ public static class Endpoints
             .WithName("RegisterFrozenProduction");
         api.MapPost("/orders/{orderId:guid}/confirmation", ConfirmOrderAsync)
             .WithName("ConfirmOrder");
+        api.MapPost("/orders/{orderId:guid}/status-transitions", TransitionOrderStatusAsync)
+            .WithName("TransitionOrderStatus");
+        api.MapPost("/orders/{orderId:guid}/rescheduling", RescheduleOrderAsync)
+            .WithName("RescheduleOrder");
+        api.MapPost("/orders/{orderId:guid}/cancellation", CancelOrderAsync)
+            .WithName("CancelOrder");
         api.MapPost("/orders", CreateOrderAsync)
             .WithName("CreateOrder");
         api.MapPut("/orders/{orderId:guid}", EditOrderAsync)
@@ -140,6 +147,52 @@ public static class Endpoints
                 request.FinancialCreditAmount),
             cancellationToken);
         return TypedResults.Ok(result);
+    }
+
+    private static async Task<IResult> TransitionOrderStatusAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        TransitionOrderStatusRequest request,
+        TransitionOrderStatusHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var key = ReadIdempotencyKey(httpContext);
+        if (key.Error is not null) return key.Error;
+        return TypedResults.Ok(await handler.HandleAsync(new TransitionOrderStatusCommand(
+            orderId, request.NewStatus, request.Reason, request.ActorId,
+            request.ExpectedVersion, key.Value!), cancellationToken));
+    }
+
+    private static async Task<IResult> RescheduleOrderAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        RescheduleOrderRequest request,
+        RescheduleOrderHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var key = ReadIdempotencyKey(httpContext);
+        if (key.Error is not null) return key.Error;
+        return TypedResults.Ok(await handler.HandleAsync(new RescheduleOrderCommand(
+            orderId, request.NewOperationalDate, request.Reason, request.ActorId,
+            request.ExpectedVersion, key.Value!), cancellationToken));
+    }
+
+    private static async Task<IResult> CancelOrderAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        CancelOrderRequest request,
+        CancelOrderHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var key = ReadIdempotencyKey(httpContext);
+        if (key.Error is not null) return key.Error;
+        return TypedResults.Ok(await handler.HandleAsync(new CancelOrderCommand(
+            orderId, request.Reason, request.ActorId, request.ExpectedVersion, key.Value!,
+            request.CommercialDisposition, request.FrozenDisposition,
+            request.FrozenReturnInspection is null ? null : new FrozenReturnInspection(
+                request.FrozenReturnInspection.PackagingIntact,
+                request.FrozenReturnInspection.TemperatureControlled,
+                request.FrozenReturnInspection.TraceabilityIntact)), cancellationToken));
     }
 
     private static async Task<IResult> CreateOrderAsync(
@@ -314,6 +367,25 @@ public sealed record ConfirmOrderRequest(
     string? DiscountReason = null,
     decimal DeliveryFee = 0,
     decimal FinancialCreditAmount = 0);
+
+public sealed record TransitionOrderStatusRequest(
+    OrderStatus NewStatus, string Reason, Guid ActorId, long ExpectedVersion);
+
+public sealed record RescheduleOrderRequest(
+    DateOnly NewOperationalDate, string Reason, Guid ActorId, long ExpectedVersion);
+
+public sealed record CancelOrderRequest(
+    string Reason,
+    Guid ActorId,
+    long ExpectedVersion,
+    CommercialCancellationDisposition CommercialDisposition = CommercialCancellationDisposition.NotApplicable,
+    FrozenCancellationDisposition FrozenDisposition = FrozenCancellationDisposition.NotApplicable,
+    FrozenReturnInspectionRequest? FrozenReturnInspection = null);
+
+public sealed record FrozenReturnInspectionRequest(
+    bool PackagingIntact,
+    bool TemperatureControlled,
+    bool TraceabilityIntact);
 
 public sealed record PlanCreditRequestBody(Guid OrderItemId, int Quantity);
 

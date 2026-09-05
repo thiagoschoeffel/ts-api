@@ -32,4 +32,25 @@ public sealed class OrderCharge : ITenantOwned
     public decimal Amount { get; private set; }
     public DateOnly DueOn { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public OrderChargeStatus Status { get; private set; } = OrderChargeStatus.Pending;
+    public Guid? CancelledBy { get; private set; }
+    public DateTimeOffset? CancelledAt { get; private set; }
+
+    public void Cancel(Guid actorId, DateTimeOffset cancelledAt)
+    {
+        if (Status != OrderChargeStatus.Pending || actorId == Guid.Empty)
+        {
+            throw new DomainException("Somente uma cobrança pendente pode ser cancelada por um responsável válido.");
+        }
+
+        Status = OrderChargeStatus.Cancelled;
+        CancelledBy = actorId;
+        CancelledAt = cancelledAt;
+    }
+}
+
+public enum OrderChargeStatus
+{
+    Pending = 0,
+    Cancelled = 1,
 }

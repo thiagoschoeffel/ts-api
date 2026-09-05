@@ -11,6 +11,7 @@ public sealed class Order : ITenantOwned
     private readonly List<OrderItemComponent> _componentSnapshots = [];
     private readonly List<OrderPlanCreditAllocation> _planCreditAllocations = [];
     private readonly List<OrderConfirmationAudit> _confirmationAudits = [];
+    private readonly List<OrderLifecycleEvent> _lifecycleEvents = [];
 
     private Order() { }
 
@@ -45,6 +46,7 @@ public sealed class Order : ITenantOwned
     public IReadOnlyCollection<OrderItemComponent> ComponentSnapshots => _componentSnapshots.AsReadOnly();
     public IReadOnlyCollection<OrderPlanCreditAllocation> PlanCreditAllocations => _planCreditAllocations.AsReadOnly();
     public IReadOnlyCollection<OrderConfirmationAudit> ConfirmationAudits => _confirmationAudits.AsReadOnly();
+    public IReadOnlyCollection<OrderLifecycleEvent> LifecycleEvents => _lifecycleEvents.AsReadOnly();
     public int DailyCapacityUnits => _items
         .Where(item => item.FulfillmentMode == OfferFulfillmentMode.DailyProduction)
         .Sum(item => item.Quantity);
@@ -237,6 +239,114 @@ public sealed class Order : ITenantOwned
         Version++;
     }
 
+    public void TransitionStatus(
+        OrderStatus newStatus,
+        string reason,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string idempotencyKey)
+    {
+        var allowed = Status switch
+        {
+            OrderStatus.Confirmed => newStatus == OrderStatus.InProduction,
+            OrderStatus.InProduction => newStatus == OrderStatus.InPacking,
+            OrderStatus.InPacking => newStatus == OrderStatus.InDelivery,
+            OrderStatus.InDelivery => newStatus is OrderStatus.Completed or OrderStatus.DeliveryFailed,
+            OrderStatus.DeliveryFailed => newStatus == OrderStatus.InDelivery,
+            _ => false,
+        };
+        if (!allowed)
+        {
+            throw new DomainException($"A transição de {Status} para {newStatus} não é permitida.");
+        }
+
+        var previousStatus = Status;
+        Status = newStatus;
+        _lifecycleEvents.Add(CreateLifecycleEvent(
+            OrderLifecycleEventType.StatusTransition, previousStatus, newStatus,
+            OperationalDate, OperationalDate, reason, actorId, occurredAt, idempotencyKey));
+        Version++;
+    }
+
+    public void Reschedule(
+        DateOnly newOperationalDate,
+        string reason,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string idempotencyKey)
+    {
+        if (Status != OrderStatus.Confirmed)
+        {
+            throw new DomainException("Somente um pedido confirmado e ainda não iniciado pode ser reagendado.");
+        }
+
+        if (newOperationalDate == OperationalDate)
+        {
+            throw new DomainException("A nova data operacional deve ser diferente da data atual.");
+        }
+
+        var previousDate = OperationalDate;
+        OperationalDate = newOperationalDate;
+        _lifecycleEvents.Add(CreateLifecycleEvent(
+            OrderLifecycleEventType.Rescheduled, Status, Status,
+            previousDate, newOperationalDate, reason, actorId, occurredAt, idempotencyKey));
+        Version++;
+    }
+
+    public void Cancel(
+        string reason,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string idempotencyKey,
+        CommercialCancellationDisposition commercialDisposition,
+        FrozenCancellationDisposition frozenDisposition,
+        FrozenReturnInspection? frozenReturnInspection,
+        int capacityUnitsReleased,
+        int planCreditsReversed,
+        decimal financialCreditReversed,
+        int chargesCancelled)
+    {
+        EnsureCanCancel(commercialDisposition, frozenDisposition, frozenReturnInspection);
+        var previousStatus = Status;
+        Status = OrderStatus.Cancelled;
+        _lifecycleEvents.Add(CreateLifecycleEvent(
+            OrderLifecycleEventType.Cancelled, previousStatus, Status,
+            OperationalDate, OperationalDate, reason, actorId, occurredAt, idempotencyKey,
+            commercialDisposition, frozenDisposition, frozenReturnInspection, capacityUnitsReleased,
+            planCreditsReversed, financialCreditReversed, chargesCancelled));
+        Version++;
+    }
+
+    public void EnsureCanCancel(
+        CommercialCancellationDisposition commercialDisposition,
+        FrozenCancellationDisposition frozenDisposition,
+        FrozenReturnInspection? frozenReturnInspection)
+    {
+        if (Status is OrderStatus.Cancelled or OrderStatus.Completed)
+            throw new DomainException("Um pedido cancelado ou concluído não pode ser cancelado.");
+
+        if (!Enum.IsDefined(commercialDisposition) || !Enum.IsDefined(frozenDisposition))
+            throw new DomainException("As decisões comercial e física do cancelamento são inválidas.");
+
+        if (frozenReturnInspection is not null
+            && frozenDisposition != FrozenCancellationDisposition.ReturnToStock)
+            throw new DomainException("A conferência de retorno só se aplica a congelados destinados ao estoque.");
+
+        if (Status == OrderStatus.Open
+            && commercialDisposition != CommercialCancellationDisposition.NotApplicable)
+            throw new DomainException("Pedido aberto não possui efeitos comerciais para estornar ou preservar.");
+
+        if (Status == OrderStatus.Confirmed
+            && commercialDisposition != CommercialCancellationDisposition.Reverse)
+            throw new DomainException("O cancelamento antes da produção deve reverter os efeitos comerciais.");
+
+        if (Status is not OrderStatus.Open and not OrderStatus.Confirmed
+            && commercialDisposition == CommercialCancellationDisposition.NotApplicable)
+            throw new DomainException("O cancelamento após o início da produção exige decidir entre estornar ou preservar os efeitos comerciais.");
+
+        ValidateFrozenCancellation(frozenDisposition, frozenReturnInspection);
+    }
+
     private void ReplaceItems(IReadOnlyCollection<OrderItemDefinition> items)
     {
         _items.Clear();
@@ -266,6 +376,67 @@ public sealed class Order : ITenantOwned
         }
 
         return normalized;
+    }
+
+    private void ValidateFrozenCancellation(
+        FrozenCancellationDisposition disposition,
+        FrozenReturnInspection? inspection)
+    {
+        if (_frozenAllocations.Count == 0)
+        {
+            if (disposition != FrozenCancellationDisposition.NotApplicable)
+                throw new DomainException("Pedido sem congelados deve usar a destinação NotApplicable.");
+            return;
+        }
+
+        if (disposition == FrozenCancellationDisposition.NotApplicable)
+            throw new DomainException("A destinação física dos congelados é obrigatória.");
+
+        if (Status == OrderStatus.Confirmed
+            && disposition != FrozenCancellationDisposition.ReturnToStock)
+            throw new DomainException("Congelados ainda não separados devem retornar ao mesmo lote.");
+
+        if (Status is OrderStatus.InProduction or OrderStatus.InPacking
+            && disposition == FrozenCancellationDisposition.ReturnToStock
+            && (inspection is null
+                || !inspection.PackagingIntact
+                || !inspection.TemperatureControlled
+                || !inspection.TraceabilityIntact))
+            throw new DomainException("O retorno de congelados separados exige conferência humana com embalagem, temperatura e rastreabilidade íntegras.");
+
+        if (Status is OrderStatus.InDelivery or OrderStatus.DeliveryFailed
+            && disposition == FrozenCancellationDisposition.ReturnToStock)
+            throw new DomainException("Congelados expedidos ou com cadeia fria duvidosa não podem retornar ao estoque vendável.");
+    }
+
+    private OrderLifecycleEvent CreateLifecycleEvent(
+        OrderLifecycleEventType type,
+        OrderStatus previousStatus,
+        OrderStatus newStatus,
+        DateOnly previousOperationalDate,
+        DateOnly newOperationalDate,
+        string reason,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string idempotencyKey,
+        CommercialCancellationDisposition commercialDisposition = CommercialCancellationDisposition.NotApplicable,
+        FrozenCancellationDisposition frozenDisposition = FrozenCancellationDisposition.NotApplicable,
+        FrozenReturnInspection? frozenReturnInspection = null,
+        int capacityUnitsReleased = 0,
+        int planCreditsReversed = 0,
+        decimal financialCreditReversed = 0,
+        int chargesCancelled = 0)
+    {
+        var normalizedReason = reason?.Trim() ?? string.Empty;
+        if (actorId == Guid.Empty || normalizedReason.Length is 0 or > 500)
+            throw new DomainException("Responsável e motivo com até 500 caracteres são obrigatórios.");
+
+        return new OrderLifecycleEvent(
+            OrganizationId, Id, type, previousStatus, newStatus,
+            previousOperationalDate, newOperationalDate, Version, normalizedReason,
+            actorId, occurredAt, NormalizeIdempotencyKey(idempotencyKey),
+            commercialDisposition, frozenDisposition, frozenReturnInspection, capacityUnitsReleased,
+            planCreditsReversed, financialCreditReversed, chargesCancelled);
     }
 }
 
