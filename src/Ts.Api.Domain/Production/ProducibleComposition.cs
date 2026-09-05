@@ -69,7 +69,9 @@ public sealed class ProducibleComponent : ITenantOwned
         string name,
         decimal quantity,
         string measurementUnit,
-        string dietaryMarkers)
+        string dietaryMarkers,
+        Guid? referencedProducibleItemId,
+        string kind)
     {
         Id = Guid.NewGuid();
         OrganizationId = organizationId;
@@ -78,6 +80,8 @@ public sealed class ProducibleComponent : ITenantOwned
         Quantity = quantity;
         MeasurementUnit = measurementUnit;
         DietaryMarkers = dietaryMarkers;
+        ReferencedProducibleItemId = referencedProducibleItemId;
+        Kind = kind;
     }
 
     public Guid Id { get; private set; }
@@ -87,6 +91,8 @@ public sealed class ProducibleComponent : ITenantOwned
     public decimal Quantity { get; private set; }
     public string MeasurementUnit { get; private set; } = string.Empty;
     public string DietaryMarkers { get; private set; } = string.Empty;
+    public Guid? ReferencedProducibleItemId { get; private set; }
+    public string Kind { get; private set; } = "Ingredient";
     public IReadOnlyCollection<string> Markers => DietaryMarkers
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -107,8 +113,13 @@ public sealed class ProducibleComponent : ITenantOwned
             .Where(marker => marker.Length > 0)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(marker => marker, StringComparer.Ordinal));
+        var kind = definition.Kind?.Trim() ?? "Ingredient";
+        if (kind is not ("Ingredient" or "ProducibleItem")
+            || (kind == "ProducibleItem") != definition.ReferencedProducibleItemId.HasValue)
+            throw new DomainException("O tipo e a referência do componente são incompatíveis.");
         return new ProducibleComponent(
-            organizationId, compositionId, name, definition.Quantity, unit, markers);
+            organizationId, compositionId, name, definition.Quantity, unit, markers,
+            definition.ReferencedProducibleItemId, kind);
     }
 
     public static string NormalizeMarker(string marker) => (marker ?? string.Empty).Trim().ToUpperInvariant();
@@ -118,4 +129,6 @@ public sealed record ProducibleComponentDefinition(
     string Name,
     decimal Quantity,
     string MeasurementUnit,
-    IReadOnlyCollection<string> DietaryMarkers);
+    IReadOnlyCollection<string> DietaryMarkers,
+    Guid? ReferencedProducibleItemId = null,
+    string Kind = "Ingredient");

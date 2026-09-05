@@ -3,9 +3,11 @@ using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
+using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
+using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Organizations;
@@ -27,9 +29,26 @@ public static class Endpoints
         api.MapPost("/catalog/offers", CreateOfferAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
             .WithName("CreateCatalogOffer");
+        api.MapGet("/catalog", GetCatalogAsync).WithName("GetCatalog");
+        api.MapPut("/catalog/offers/{offerId:guid}", SaveOfferAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateCatalogOffer");
+        api.MapPost("/catalog/offers/configured", CreateConfiguredOfferAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateConfiguredCatalogOffer");
+        api.MapPost("/catalog/component-types", CreateComponentTypeAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateComponentType");
+        api.MapPut("/catalog/component-types/{id:guid}", UpdateComponentTypeAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateComponentType");
+        api.MapPost("/catalog/addons", CreateAddonAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateCatalogAddon");
+        api.MapPut("/catalog/addons/{id:guid}", UpdateAddonAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateCatalogAddon");
         api.MapPost("/production/items", CreateProducibleItemAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
             .WithName("CreateProducibleItem");
+        api.MapGet("/production/items", GetProduciblesAsync).WithName("GetProducibleItems");
+        api.MapPost("/production/items/configured", CreateConfiguredProducibleAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateConfiguredProducibleItem");
+        api.MapPut("/production/items/{id:guid}", UpdateProducibleAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateProducibleItem");
+        api.MapGet("/menus", ListMenusAsync).WithName("ListDailyMenus");
+        api.MapGet("/menus/{date}", GetMenuAsync).WithName("GetDailyMenu");
+        api.MapPut("/menus/{date}", SaveMenuAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("SaveDailyMenu");
+        api.MapPost("/menus/{date}/publication", PublishMenuAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("PublishDailyMenu");
+        api.MapPost("/menus/import", ImportMenusAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("ImportDailyMenus");
+        api.MapPut("/menu-plans/{weekStart}", SaveWeeklyPlanAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("SaveWeeklyMenuPlan");
+        api.MapGet("/menu-plans/{weekStart}", GetWeeklyPlanAsync).WithName("GetWeeklyMenuPlan");
         api.MapPost("/frozen-stock/configurations", CreateFrozenConfigurationAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
             .WithName("CreateFrozenConfiguration");
@@ -137,6 +156,29 @@ public static class Endpoints
         return TypedResults.Created($"/api/catalog/offers/{result.Id}", result);
     }
 
+    private static async Task<IResult> GetCatalogAsync(GetCatalogHandler handler, CancellationToken token) =>
+        TypedResults.Ok(await handler.HandleAsync(token));
+    private static async Task<IResult> CreateConfiguredOfferAsync(CatalogOfferRequest request, SaveOfferHandler handler, CancellationToken token)
+    {
+        var result = await handler.HandleAsync(null, MapOffer(request), token);
+        return TypedResults.Created($"/api/catalog/offers/{result.Id}", result);
+    }
+    private static async Task<IResult> SaveOfferAsync(Guid offerId, CatalogOfferRequest request, SaveOfferHandler handler, CancellationToken token) =>
+        TypedResults.Ok(await handler.HandleAsync(offerId, MapOffer(request), token));
+    private static CatalogOfferInput MapOffer(CatalogOfferRequest request) => new(request.Name, request.Description, request.BasePrice,
+        request.FulfillmentMode, request.RequiresMenuChoice, request.IsActive, new(
+            request.Components.Select(x => new OfferComponentInput(x.ComponentTypeId, x.Quantity)).ToArray(),
+            request.ChoiceGroups.Select(x => new OfferChoiceGroupInput(x.Name, x.MinimumSelections, x.MaximumSelections,
+                x.Options.Select(o => new OfferChoiceOptionInput(o.ComponentTypeId, o.Surcharge)).ToArray())).ToArray(), request.AllowedAddonIds));
+    private static async Task<IResult> CreateComponentTypeAsync(ComponentTypeRequest request, SaveComponentTypeHandler handler, CancellationToken token) =>
+        TypedResults.Created("/api/catalog/component-types", await handler.HandleAsync(null, new(request.Name, request.Description, request.IsActive), token));
+    private static async Task<IResult> UpdateComponentTypeAsync(Guid id, ComponentTypeRequest request, SaveComponentTypeHandler handler, CancellationToken token) =>
+        TypedResults.Ok(await handler.HandleAsync(id, new(request.Name, request.Description, request.IsActive), token));
+    private static async Task<IResult> CreateAddonAsync(CatalogAddonRequest request, SaveAddonHandler handler, CancellationToken token) =>
+        TypedResults.Created("/api/catalog/addons", await handler.HandleAsync(null, new(request.Name, request.Price, request.ProducibleItemId, request.OperationalQuantity, request.MeasurementUnit, request.IsActive), token));
+    private static async Task<IResult> UpdateAddonAsync(Guid id, CatalogAddonRequest request, SaveAddonHandler handler, CancellationToken token) =>
+        TypedResults.Ok(await handler.HandleAsync(id, new(request.Name, request.Price, request.ProducibleItemId, request.OperationalQuantity, request.MeasurementUnit, request.IsActive), token));
+
     private static async Task<IResult> CreateProducibleItemAsync(
         CreateProducibleItemRequest request,
         CreateProducibleItemHandler handler,
@@ -147,6 +189,28 @@ public static class Endpoints
             cancellationToken);
         return TypedResults.Created($"/api/production/items/{result.Id}", result);
     }
+
+    private static async Task<IResult> GetProduciblesAsync(GetProduciblesHandler handler, CancellationToken token) =>
+        TypedResults.Ok(await handler.HandleAsync(token));
+    private static async Task<IResult> CreateConfiguredProducibleAsync(ProducibleRequest request, SaveProducibleHandler handler, CancellationToken token) =>
+        TypedResults.Created("/api/production/items", await handler.HandleAsync(null, new(request.Name, request.Description, request.Category, request.MeasurementUnit, request.IsActive), token));
+    private static async Task<IResult> UpdateProducibleAsync(Guid id, ProducibleRequest request, SaveProducibleHandler handler, CancellationToken token) =>
+        TypedResults.Ok(await handler.HandleAsync(id, new(request.Name, request.Description, request.Category, request.MeasurementUnit, request.IsActive), token));
+    private static async Task<IResult> ListMenusAsync(DateOnly? from, DateOnly? to, MenuService service, CancellationToken token) => TypedResults.Ok(await service.ListAsync(from, to, token));
+    private static async Task<IResult> GetMenuAsync(DateOnly date, MenuService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(date, token));
+    private static async Task<IResult> SaveMenuAsync(DateOnly date, DailyMenuRequest request, MenuService service, CancellationToken token) =>
+        TypedResults.Ok(await service.SaveAsync(MapMenu(date, request), token));
+    private static async Task<IResult> PublishMenuAsync(DateOnly date, PublishMenuRequest request, MenuService service, CancellationToken token) =>
+        TypedResults.Ok(await service.PublishAsync(date, request.ExpectedVersion, token));
+    private static async Task<IResult> ImportMenusAsync(IReadOnlyCollection<DailyMenuImportRequest> requests, MenuService service, CancellationToken token) =>
+        TypedResults.Ok(await service.ImportAsync(requests.Select(x => MapMenu(x.Date, x.Menu)).ToArray(), token));
+    private static async Task<IResult> SaveWeeklyPlanAsync(DateOnly weekStart, WeeklyPlanRequest request, MenuService service, CancellationToken token) =>
+        TypedResults.Ok(await service.SavePlanAsync(new(weekStart, request.Days.Select(x => MapMenu(x.Date, x.Menu)).ToArray()), request.DeriveDrafts, token));
+    private static async Task<IResult> GetWeeklyPlanAsync(DateOnly weekStart, MenuService service, CancellationToken token) =>
+        TypedResults.Ok(await service.GetPlanAsync(weekStart, token));
+    private static DailyMenuInput MapMenu(DateOnly date, DailyMenuRequest request) => new(date,
+        request.Options.Select(x => new MenuOptionInput(x.Category, x.ProducibleItemId, x.Availability)).ToArray(),
+        request.Offers.Select(x => new MenuOfferInput(x.OfferId, x.EffectivePrice, x.Availability, x.DisplayOrder)).ToArray(), request.ExpectedVersion);
 
     private static async Task<IResult> CreateFrozenConfigurationAsync(
         CreateFrozenConfigurationRequest request,
@@ -468,7 +532,7 @@ public static class Endpoints
         var result = await handler.HandleAsync(new PublishCompositionCommand(
             producibleItemId,
             request.Components.Select(item => new ProducibleComponentDefinition(
-                item.Name, item.Quantity, item.MeasurementUnit, item.DietaryMarkers ?? [])).ToArray()), cancellationToken);
+                item.Name, item.Quantity, item.MeasurementUnit, item.DietaryMarkers ?? [], item.ReferencedProducibleItemId, item.Kind)).ToArray()), cancellationToken);
         return TypedResults.Created($"/api/production/items/{producibleItemId}/compositions/{result.Id}", result);
     }
 
@@ -525,8 +589,23 @@ public static class Endpoints
 }
 
 public sealed record CreateOfferRequest(string Name, OfferFulfillmentMode FulfillmentMode);
+public sealed record CatalogOfferRequest(string Name, string? Description, decimal BasePrice, OfferFulfillmentMode FulfillmentMode,
+    bool RequiresMenuChoice, bool IsActive, IReadOnlyCollection<OfferComponentRequest> Components,
+    IReadOnlyCollection<OfferChoiceGroupRequest> ChoiceGroups, IReadOnlyCollection<Guid> AllowedAddonIds);
+public sealed record OfferComponentRequest(Guid ComponentTypeId, decimal Quantity);
+public sealed record OfferChoiceGroupRequest(string Name, int MinimumSelections, int MaximumSelections, IReadOnlyCollection<OfferChoiceOptionRequest> Options);
+public sealed record OfferChoiceOptionRequest(Guid ComponentTypeId, decimal Surcharge);
+public sealed record ComponentTypeRequest(string Name, string? Description, bool IsActive = true);
+public sealed record CatalogAddonRequest(string Name, decimal Price, Guid? ProducibleItemId, decimal? OperationalQuantity, string? MeasurementUnit, bool IsActive = true);
 
 public sealed record CreateProducibleItemRequest(string Name);
+public sealed record ProducibleRequest(string Name, string? Description, string Category, string MeasurementUnit, bool IsActive = true);
+public sealed record DailyMenuRequest(IReadOnlyCollection<MenuOptionRequest> Options, IReadOnlyCollection<MenuOfferRequest> Offers, long? ExpectedVersion = null);
+public sealed record MenuOptionRequest(string Category, Guid ProducibleItemId, MenuAvailability Availability);
+public sealed record MenuOfferRequest(Guid OfferId, decimal EffectivePrice, MenuAvailability Availability, int DisplayOrder);
+public sealed record PublishMenuRequest(long ExpectedVersion);
+public sealed record DailyMenuImportRequest(DateOnly Date, DailyMenuRequest Menu);
+public sealed record WeeklyPlanRequest(IReadOnlyCollection<DailyMenuImportRequest> Days, bool DeriveDrafts = false);
 
 public sealed record CreateFrozenConfigurationRequest(
     Guid OfferId,
@@ -610,7 +689,8 @@ public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long Expected
 
 public sealed record PublishCompositionRequest(IReadOnlyCollection<ProducibleComponentRequest> Components);
 public sealed record ProducibleComponentRequest(
-    string Name, decimal Quantity, string MeasurementUnit, IReadOnlyCollection<string>? DietaryMarkers = null);
+    string Name, decimal Quantity, string MeasurementUnit, IReadOnlyCollection<string>? DietaryMarkers = null,
+    Guid? ReferencedProducibleItemId = null, string Kind = "Ingredient");
 public sealed record AddCustomerRestrictionRequest(string Marker);
 public sealed record CreatePlanAcquisitionRequest(
     Guid CustomerId, Guid EligibleOfferId, string PlanName, int Credits,

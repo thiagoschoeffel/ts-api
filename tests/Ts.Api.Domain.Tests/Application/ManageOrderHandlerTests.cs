@@ -148,6 +148,32 @@ public sealed class ManageOrderHandlerTests
         Assert.Equal("O pedido foi alterado. Recarregue os dados antes de editar.", exception.Message);
     }
 
+    [Fact]
+    public async Task Create_RejectsDailyOfferOutsidePublishedMenu()
+    {
+        var offer = CatalogOffer.Create(OrganizationId, "Almoço", OfferFulfillmentMode.DailyProduction, basePrice: 20);
+        var producible = ProducibleItem.Create(OrganizationId, "Prato do dia");
+        var store = new OrderManagementStoreFake([offer], [], [producible], menuAuthorization: new(false, 20, true));
+        var handler = new CreateOrderHandler(store, new OrganizationContextFake());
+        var exception = await Assert.ThrowsAsync<Ts.Api.Domain.Common.DomainException>(() => handler.HandleAsync(
+            new CreateOrderCommand(Guid.NewGuid(), new DateOnly(2026, 9, 7),
+                [new OrderItemInput(offer.Id, 1, 20, ProducibleItemId: producible.Id)], "unpublished-menu"), CancellationToken.None));
+        Assert.Contains("cardápio publicado", exception.Message);
+    }
+
+    [Fact]
+    public async Task Create_RejectsPriceDifferentFromPublishedMenu()
+    {
+        var offer = CatalogOffer.Create(OrganizationId, "Almoço", OfferFulfillmentMode.DailyProduction, basePrice: 20);
+        var producible = ProducibleItem.Create(OrganizationId, "Prato do dia");
+        var store = new OrderManagementStoreFake([offer], [], [producible], menuAuthorization: new(true, 22, true));
+        var handler = new CreateOrderHandler(store, new OrganizationContextFake());
+        var exception = await Assert.ThrowsAsync<Ts.Api.Domain.Common.DomainException>(() => handler.HandleAsync(
+            new CreateOrderCommand(Guid.NewGuid(), new DateOnly(2026, 9, 7),
+                [new OrderItemInput(offer.Id, 1, 20, ProducibleItemId: producible.Id)], "wrong-menu-price"), CancellationToken.None));
+        Assert.Contains("preço publicado", exception.Message);
+    }
+
     private sealed class OrganizationContextFake : IOrganizationContext
     {
         public bool IsAvailable => true;
@@ -158,7 +184,8 @@ public sealed class ManageOrderHandlerTests
         IReadOnlyCollection<CatalogOffer> offers,
         IReadOnlyCollection<FrozenConfiguration> configurations,
         IReadOnlyCollection<ProducibleItem> producibleItems,
-        IReadOnlyCollection<Order>? initialOrders = null) : IOrderManagementStore
+        IReadOnlyCollection<Order>? initialOrders = null,
+        MenuOfferAuthorization? menuAuthorization = null) : IOrderManagementStore
     {
         public List<Order> Orders { get; } = initialOrders?.ToList() ?? [];
         public int SaveCount { get; private set; }
@@ -188,6 +215,9 @@ public sealed class ManageOrderHandlerTests
             Guid id,
             CancellationToken cancellationToken) => Task.FromResult(
             producibleItems.SingleOrDefault(item => item.Id == id && item.IsActive));
+
+        public Task<MenuOfferAuthorization?> FindMenuOfferAuthorizationAsync(DateOnly operationalDate, Guid offerId,
+            Guid? producibleItemId, CancellationToken cancellationToken) => Task.FromResult(menuAuthorization);
 
         public Task AddAsync(Order order, CancellationToken cancellationToken)
         {
