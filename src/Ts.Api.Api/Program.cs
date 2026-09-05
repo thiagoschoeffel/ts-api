@@ -13,6 +13,7 @@ using Ts.Api.Application.Logistics;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
+using Ts.Api.Application.Attendance;
 using Ts.Api.Infrastructure;
 using Ts.Api.Infrastructure.Persistence;
 using Ts.Api.Domain.Organizations;
@@ -105,6 +106,7 @@ builder.Services.AddScoped<CreatePlanAcquisitionHandler>();
 builder.Services.AddScoped<GrantFinancialCreditHandler>();
 builder.Services.AddScoped<CommerceService>();
 builder.Services.AddScoped<LogisticsService>();
+builder.Services.AddScoped<AttendanceService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
@@ -134,6 +136,7 @@ app.MapGet("/health/ready", async (AppDbContext database, CancellationToken canc
     .WithName("Readiness");
 
 app.MapApplicationEndpoints();
+app.MapWhatsAppWebhooks();
 
 app.Run();
 

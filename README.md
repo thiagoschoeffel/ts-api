@@ -2,11 +2,12 @@
 
 API autoritativa da Sabor Santè, construída em .NET 10 e organizada como monólito modular.
 
-> **Estado atual:** os épicos E02–E12 estão concluídos. A fundação autoritativa,
+> **Estado atual:** os épicos E02–E13 estão concluídos. A fundação autoritativa,
 > o ciclo transacional de Pedidos e as integrações de Congelados, Pedidos e
 > capacidade, Produção, Embalagem e histórico de impressão estão disponíveis.
 > Catálogo, Produzíveis, Cardápios e planejamento semanal também são persistidos pela API.
 > Clientes, Planos, créditos, cobranças, pagamentos e alocações agora compartilham a mesma fonte autoritativa.
+> O E14 está implementado para homologação com a Meta; a validação no número de teste oficial depende das credenciais do ambiente.
 
 ## Estado atual
 
@@ -55,6 +56,9 @@ As fatias implementadas estabelecem:
 - nome do cliente preservado no Pedido para que a identificação externa não dependa de alterações cadastrais posteriores;
 - tentativas de impressão e reimpressão persistidas com ator, instante, seleção e resultado, sem alterar Pedido ou estoque;
 - health checks de processo e banco;
+- caixa de Atendimento persistente, ordenada por conversa e vinculada ao Cliente e ao Pedido mais recente quando o telefone coincide;
+- integração direta com a Meta WhatsApp Cloud API, webhook validado por `X-Hub-Signature-256`, handoff humano, envio idempotente e conciliação de entrega/falha;
+- franquia mensal por número comercial com reservas concorrentes, pausa da automação em 97% e bloqueio do envio gratuito ao atingir o limite;
 - testes unitários das invariantes já implementadas;
 - execução local e imagem de deploy com Docker.
 
@@ -116,6 +120,12 @@ GET  /api/operations/packing?operationalDate={date}
 POST /api/operations/packing/{orderId}
 POST /api/operations/packing/{orderId}/print-attempts
 GET  /api/session
+GET  /api/attendance
+PUT  /api/attendance/conversations/{conversationId}/mode
+POST /api/attendance/conversations/{conversationId}/messages
+POST /api/attendance/conversations/{conversationId}/messages/{messageId}/retry
+GET  /webhooks/whatsapp/{organizationId}
+POST /webhooks/whatsapp/{organizationId}
 ```
 
 Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token precisa ter audiência `ts-api`, subject (`sub`) correspondente a um usuário ativo da plataforma e a claim `organization_id`. Para solicitar outra associação do mesmo usuário, o shell envia `X-Organization-Id`; a API só aceita o valor depois de confirmar usuário, Organização e associação ativos no banco. O header é uma solicitação de seleção, nunca autoridade de isolamento.
@@ -130,6 +140,18 @@ entre ativo e disponível. Rotas capturam snapshots de cliente, telefone e
 endereço, preservam a ordem manual das paradas e só iniciam após revalidar todos
 os Pedidos de forma transacional. Cada tentativa é histórica e idempotente;
 falhas exigem motivo e podem ser reagendadas sem reescrever a tentativa anterior.
+
+## Atendimento e WhatsApp
+
+A integração escolhida é a Meta WhatsApp Cloud API direta. O frontend recebe somente DTOs de Atendimento; `AccessToken`, `AppSecret` e token de verificação ficam exclusivamente no processo da API. O endpoint público de webhook valida a organização configurada e a assinatura HMAC antes de persistir. O identificador externo é único por tenant, de modo que a repetição do mesmo evento não duplica mensagem nem efeito. A sequência também é única por conversa e é atribuída dentro de transação serializável.
+
+Configure `WHATSAPP_ORGANIZATION_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_PHONE_NUMBER`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET` e um `WHATSAPP_WEBHOOK_VERIFY_TOKEN` aleatório. Cadastre na Meta a URL HTTPS pública `https://<api>/webhooks/whatsapp/<organization-id>` e assine o campo `messages`. O número e a Organização são decisões de deploy; não são aceitos do frontend.
+
+A API nunca inicia uma conversa: envia texto apenas em uma conversa previamente criada por mensagem recebida. Respostas observadas por `message_echoes` colocam a conversa em modo Humano. A coexistência com o aplicativo WhatsApp Business depende da elegibilidade e do onboarding oficial da conta; valide o espelhamento no número de teste e depois no número comercial antes do go-live.
+
+O período de franquia é histórico e mensal por número. O uso operacional é `Delivered + Reserved`; a reserva ocorre antes da chamada à Meta, a confirmação `delivered` transforma reserva em consumo e a falha definitiva libera a reserva. Os defaults de 1.000 mensagens gratuitas e pausa em 970 refletem a política anunciada para 1º de outubro de 2026, mas são configuração operacional e precisam ser reconfirmados na [página oficial de preços](https://whatsappbusiness.com/products/platform-pricing/) antes da produção.
+
+Privacidade e opt-in: o negócio deve informar o uso do canal e conservar a evidência do consentimento aplicável fora do texto livre da conversa; pedidos de exclusão devem seguir a política de retenção da organização. Não registre tokens nem payloads integrais em logs. Mensagens livres só podem ser respondidas dentro da janela permitida pela Meta; este fluxo não envia templates nem campanhas e não deve ser usado para marketing.
 Uma rota é concluída quando todas as paradas foram tratadas, mesmo com falhas.
 
 A entrada de produção, o ajuste/descarte de congelados, a criação/edição do Pedido, a configuração de capacidade, a confirmação, a embalagem, o registro de impressão e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento, cancelamento e embalagem também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.

@@ -7,6 +7,7 @@ using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
 using Ts.Api.Application.Logistics;
+using Ts.Api.Application.Attendance;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Menus;
@@ -139,11 +140,17 @@ public static class Endpoints
         api.MapPost("/delivery-routes/{id:guid}/cancellation", CancelDeliveryRouteAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("CancelDeliveryRoute");
         api.MapPost("/delivery-routes/{routeId:guid}/stops/{stopId:guid}/attempts", RecordDeliveryAttemptAsync).WithName("RecordDeliveryAttempt");
         api.MapPost("/orders/{orderId:guid}/delivery-rescheduling", RescheduleDeliveryAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("RescheduleDelivery");
+        api.MapGet("/attendance", (AttendanceService service, CancellationToken token) => service.GetAsync(token)).RequireAuthorization(AuthorizationPolicies.Operate).WithName("GetAttendance");
+        api.MapPut("/attendance/conversations/{id:guid}/mode", (Guid id, AttendanceModeRequest request, AttendanceService service, CancellationToken token) => service.ChangeModeAsync(id, request.Mode, request.ExpectedVersion, token)).RequireAuthorization(AuthorizationPolicies.Operate).WithName("ChangeAttendanceMode");
+        api.MapPost("/attendance/conversations/{id:guid}/messages", SendAttendanceMessageAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("SendAttendanceMessage");
+        api.MapPost("/attendance/conversations/{conversationId:guid}/messages/{messageId:guid}/retry", (Guid conversationId, Guid messageId, AttendanceService service, CancellationToken token) => service.RetryAsync(conversationId, messageId, token)).RequireAuthorization(AuthorizationPolicies.Operate).WithName("RetryAttendanceMessage");
 
         return endpoints;
     }
 
     private static async Task<IResult> GetLogisticsAsync(LogisticsService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(token));
+    private static async Task<IResult> SendAttendanceMessageAsync(Guid id, AttendanceMessageRequest request, HttpContext context, AttendanceService service, CancellationToken token)
+    { var key = ReadIdempotencyKey(context); return key.Error ?? TypedResults.Ok(await service.SendAsync(id, request.Content, key.Value!, token)); }
     private static async Task<IResult> CreateDeliveryDriverAsync(DeliveryDriverRequest request, LogisticsService service, CancellationToken token) =>
         TypedResults.Created("/api/delivery-drivers", await service.SaveDriverAsync(null, new(request.Identification, request.Name, request.Phone, request.IsActive, request.IsAvailable), token));
     private static async Task<IResult> UpdateDeliveryDriverAsync(Guid id, DeliveryDriverRequest request, LogisticsService service, CancellationToken token) =>
@@ -649,6 +656,9 @@ public static class Endpoints
             : (value, null);
     }
 }
+
+public sealed record AttendanceModeRequest(Ts.Api.Domain.Attendance.AttendanceMode Mode, long ExpectedVersion);
+public sealed record AttendanceMessageRequest(string Content);
 
 public sealed record CreateOfferRequest(string Name, OfferFulfillmentMode FulfillmentMode);
 public sealed record CatalogOfferRequest(string Name, string? Description, decimal BasePrice, OfferFulfillmentMode FulfillmentMode,
