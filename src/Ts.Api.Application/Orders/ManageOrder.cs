@@ -272,6 +272,19 @@ internal static class OrderResultMapper
                 : pair.First.UnitPrice == pair.Second.UnitPrice));
     }
 
+    public static IReadOnlyCollection<OrderItemResult> MapItems(Order order) => order.Items.Select(item => new OrderItemResult(
+        item.Id,
+        item.OfferId,
+        item.OfferName,
+        item.FulfillmentMode,
+        item.Quantity,
+        item.UnitPrice,
+        item.Total,
+        item.FrozenConfigurationId,
+        item.ProducibleItemId,
+        item.ProducibleItemName,
+        item.FrozenPresentation)).ToArray();
+
     public static OrderResult Map(Order order) => new(
         order.Id,
         order.CustomerId,
@@ -280,16 +293,5 @@ internal static class OrderResultMapper
         order.Version,
         order.DailyCapacityUnits,
         order.TotalAmount,
-        order.Items.Select(item => new OrderItemResult(
-            item.Id,
-            item.OfferId,
-            item.OfferName,
-            item.FulfillmentMode,
-            item.Quantity,
-            item.UnitPrice,
-            item.Total,
-            item.FrozenConfigurationId,
-            item.ProducibleItemId,
-            item.ProducibleItemName,
-            item.FrozenPresentation)).ToArray());
+        MapItems(order));
 }
