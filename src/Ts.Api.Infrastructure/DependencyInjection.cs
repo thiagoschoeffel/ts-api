@@ -9,6 +9,8 @@ using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
 using Ts.Api.Application.Logistics;
+using Ts.Api.Application.Attendance;
+using Ts.Api.Infrastructure.Messaging;
 using Ts.Api.Infrastructure.Persistence;
 
 namespace Ts.Api.Infrastructure;
@@ -41,6 +43,14 @@ public static class DependencyInjection
         services.AddScoped<IOperationsStore, OperationsStore>();
         services.AddScoped<ICommerceStore, CommerceStore>();
         services.AddScoped<ILogisticsStore, LogisticsStore>();
+        services.AddScoped<IAttendanceStore, AttendanceStore>();
+        services.AddSingleton(provider => new HttpClient
+        {
+            BaseAddress = new Uri(provider.GetRequiredService<IConfiguration>()["WhatsApp:GraphApiBaseUrl"] ?? "https://graph.facebook.com/v25.0/"),
+            Timeout = TimeSpan.FromSeconds(15),
+        });
+        services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
+        services.AddSingleton<IWhatsAppConfiguration, WhatsAppConfiguration>();
         return services;
     }
 }

@@ -24,6 +24,12 @@ public sealed class HttpRequestContext : IOrganizationContext, ICurrentUserConte
         userId = resolvedUserId;
         CorrelationId = correlationId;
     }
+
+    public void SetWebhookOrganization(Guid resolvedOrganizationId, string correlationId)
+    {
+        organizationId = resolvedOrganizationId;
+        CorrelationId = correlationId;
+    }
 }
 
 public sealed class OrganizationContextMiddleware(RequestDelegate next)

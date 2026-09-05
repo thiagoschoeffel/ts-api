@@ -13,6 +13,12 @@ services:
       Authentication__MetadataAddress: http://identity:8080/realms/sabor-sante/.well-known/openid-configuration
       Authentication__Audience: ts-api
       Authentication__RequireHttpsMetadata: "false"
+      WhatsApp__OrganizationId: ${WHATSAPP_ORGANIZATION_ID:-}
+      WhatsApp__PhoneNumberId: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WhatsApp__BusinessPhoneNumber: ${WHATSAPP_BUSINESS_PHONE_NUMBER:-}
+      WhatsApp__AccessToken: ${WHATSAPP_ACCESS_TOKEN:-}
+      WhatsApp__AppSecret: ${WHATSAPP_APP_SECRET:-}
+      WhatsApp__WebhookVerifyToken: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:

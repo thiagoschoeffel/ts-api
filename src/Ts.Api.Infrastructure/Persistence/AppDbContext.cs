@@ -12,6 +12,7 @@ using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Plans;
 using Ts.Api.Domain.Production;
+using Ts.Api.Domain.Attendance;
 
 namespace Ts.Api.Infrastructure.Persistence;
 
@@ -77,10 +78,34 @@ public sealed class AppDbContext : DbContext
     public DbSet<DeliveryRouteStop> DeliveryRouteStops => Set<DeliveryRouteStop>();
     public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
     public DbSet<DeliveryReschedule> DeliveryReschedules => Set<DeliveryReschedule>();
+    public DbSet<WhatsAppConversation> WhatsAppConversations => Set<WhatsAppConversation>();
+    public DbSet<WhatsAppMessage> WhatsAppMessages => Set<WhatsAppMessage>();
+    public DbSet<WhatsAppQuotaPeriod> WhatsAppQuotaPeriods => Set<WhatsAppQuotaPeriod>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("app");
+
+        modelBuilder.Entity<WhatsAppConversation>(configuration =>
+        {
+            configuration.ToTable("whatsapp_conversations"); configuration.HasKey(x => x.Id); configuration.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            configuration.Property(x => x.BusinessPhoneNumberId).HasMaxLength(100).IsRequired(); configuration.Property(x => x.BusinessPhoneNumber).HasMaxLength(30).IsRequired();
+            configuration.Property(x => x.CustomerPhone).HasMaxLength(30).IsRequired(); configuration.Property(x => x.CustomerName).HasMaxLength(160).IsRequired(); configuration.Property(x => x.Version).IsConcurrencyToken();
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
+            configuration.HasOne<Order>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.OrderId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
+            configuration.HasIndex(x => new { x.OrganizationId, x.BusinessPhoneNumberId, x.CustomerPhone }).IsUnique(); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<WhatsAppMessage>(configuration =>
+        {
+            configuration.ToTable("whatsapp_messages"); configuration.HasKey(x => x.Id); configuration.Property(x => x.ExternalId).HasMaxLength(250).IsRequired(); configuration.Property(x => x.IdempotencyKey).HasMaxLength(200); configuration.Property(x => x.Content).HasMaxLength(4096).IsRequired(); configuration.Property(x => x.FailureReason).HasMaxLength(2000);
+            configuration.HasOne<WhatsAppConversation>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ConversationId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.HasIndex(x => new { x.OrganizationId, x.ExternalId }).IsUnique(); configuration.HasIndex(x => new { x.OrganizationId, x.IdempotencyKey }).IsUnique(); configuration.HasIndex(x => new { x.OrganizationId, x.ConversationId, x.Sequence }).IsUnique(); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<WhatsAppQuotaPeriod>(configuration =>
+        {
+            configuration.ToTable("whatsapp_quota_periods"); configuration.HasKey(x => x.Id); configuration.Property(x => x.BusinessPhoneNumberId).HasMaxLength(100).IsRequired(); configuration.Property(x => x.BusinessPhoneNumber).HasMaxLength(30).IsRequired(); configuration.Property(x => x.Version).IsConcurrencyToken();
+            configuration.HasIndex(x => new { x.OrganizationId, x.BusinessPhoneNumberId, x.PeriodStart }).IsUnique(); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
 
         modelBuilder.Entity<DeliveryDriver>(configuration =>
         {
