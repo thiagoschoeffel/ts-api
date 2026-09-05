@@ -72,6 +72,7 @@ public interface ICommerceStore
     Task<IReadOnlyList<Payment>> PaymentsAsync(CancellationToken token);
     Task<IReadOnlyList<PaymentAllocation>> AllocationsAsync(CancellationToken token);
     Task<IReadOnlyList<FinancialCreditMovement>> FinancialMovementsAsync(CancellationToken token);
+    Task<bool> IsActiveDeliveryDriverAsync(Guid id, CancellationToken token);
     void Add(object entity); void RemoveRange(IEnumerable<object> entities);
     Task SaveAsync(CancellationToken token);
     Task<Payment> RegisterPaymentAsync(PaymentInput input, Guid actorId, string idempotencyKey, CancellationToken token);
@@ -115,6 +116,11 @@ public sealed class CommerceService(ICommerceStore store, IOrganizationContext o
     {
         var customer = id is null ? Customer.Create(organization.OrganizationId, input.Name, input.Phone)
             : await store.CustomerAsync(id.Value, token) ?? throw new ResourceNotFoundException("Cliente não encontrado.");
+        if (!string.IsNullOrWhiteSpace(input.PreferredDeliveryDriverId)
+            && input.PreferredDeliveryDriverId != customer.PreferredDeliveryDriverId
+            && (!Guid.TryParse(input.PreferredDeliveryDriverId, out var preferredDriverId)
+                || !await store.IsActiveDeliveryDriverAsync(preferredDriverId, token)))
+            throw new DomainException("O entregador preferencial deve estar ativo e pertencer à organização.");
         if (id is not null && customer.Version != input.ExpectedVersion) throw new ConflictException("O cliente foi alterado. Recarregue os dados antes de editar.");
         if (id is null) store.Add(customer); else customer.Update(input.Name, input.Phone, input.IsActive, input.Notes,
             input.PreferredDeliveryDriverId, input.PreferredPaymentCondition, input.PreferredPaymentMethod,

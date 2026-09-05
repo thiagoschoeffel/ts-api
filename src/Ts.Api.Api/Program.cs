@@ -9,6 +9,7 @@ using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
+using Ts.Api.Application.Logistics;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
@@ -103,6 +104,7 @@ builder.Services.AddScoped<AddCustomerRestrictionHandler>();
 builder.Services.AddScoped<CreatePlanAcquisitionHandler>();
 builder.Services.AddScoped<GrantFinancialCreditHandler>();
 builder.Services.AddScoped<CommerceService>();
+builder.Services.AddScoped<LogisticsService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

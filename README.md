@@ -120,7 +120,17 @@ GET  /api/session
 
 Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token precisa ter audiência `ts-api`, subject (`sub`) correspondente a um usuário ativo da plataforma e a claim `organization_id`. Para solicitar outra associação do mesmo usuário, o shell envia `X-Organization-Id`; a API só aceita o valor depois de confirmar usuário, Organização e associação ativos no banco. O header é uma solicitação de seleção, nunca autoridade de isolamento.
 
-Leituras aceitam qualquer associação ativa. Operações de Pedido e estoque aceitam `Owner`, `Administrator` e `Operator`; `DeliveryDriver` fica restrito a leituras até a integração logística do E13. Configuração de Catálogo, Produção, capacidade, Planos, restrições e Financeiro exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
+Leituras aceitam qualquer associação ativa. Operações de Pedido, estoque e planejamento logístico aceitam `Owner`, `Administrator` e `Operator`; o registro de tentativa também aceita uma associação `DeliveryDriver`, sempre dentro da Organização ativa. Configuração de Catálogo, Produção, capacidade, Planos, restrições, Financeiro e cadastro de entregadores exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
+
+## Logística
+
+`GET /api/logistics` consolida entregadores, Pedidos aptos, rotas, paradas,
+tentativas e reagendamentos do tenant. Entregadores são versionados e separados
+entre ativo e disponível. Rotas capturam snapshots de cliente, telefone e
+endereço, preservam a ordem manual das paradas e só iniciam após revalidar todos
+os Pedidos de forma transacional. Cada tentativa é histórica e idempotente;
+falhas exigem motivo e podem ser reagendadas sem reescrever a tentativa anterior.
+Uma rota é concluída quando todas as paradas foram tratadas, mesmo com falhas.
 
 A entrada de produção, o ajuste/descarte de congelados, a criação/edição do Pedido, a configuração de capacidade, a confirmação, a embalagem, o registro de impressão e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento, cancelamento e embalagem também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
 

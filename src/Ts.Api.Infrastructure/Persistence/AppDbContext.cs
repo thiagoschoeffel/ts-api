@@ -6,6 +6,7 @@ using Ts.Api.Domain.Customers;
 using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Menus;
+using Ts.Api.Domain.Logistics;
 using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Orders;
@@ -71,10 +72,49 @@ public sealed class AppDbContext : DbContext
     public DbSet<DailyMenuOption> DailyMenuOptions => Set<DailyMenuOption>();
     public DbSet<DailyMenuOffer> DailyMenuOffers => Set<DailyMenuOffer>();
     public DbSet<WeeklyMenuPlan> WeeklyMenuPlans => Set<WeeklyMenuPlan>();
+    public DbSet<DeliveryDriver> DeliveryDrivers => Set<DeliveryDriver>();
+    public DbSet<DeliveryRoute> DeliveryRoutes => Set<DeliveryRoute>();
+    public DbSet<DeliveryRouteStop> DeliveryRouteStops => Set<DeliveryRouteStop>();
+    public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
+    public DbSet<DeliveryReschedule> DeliveryReschedules => Set<DeliveryReschedule>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("app");
+
+        modelBuilder.Entity<DeliveryDriver>(configuration =>
+        {
+            configuration.ToTable("delivery_drivers"); configuration.HasKey(x => x.Id); configuration.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            configuration.Property(x => x.Identification).HasMaxLength(40).IsRequired(); configuration.Property(x => x.Name).HasMaxLength(160).IsRequired(); configuration.Property(x => x.Phone).HasMaxLength(15); configuration.Property(x => x.Version).IsConcurrencyToken();
+            configuration.HasIndex(x => new { x.OrganizationId, x.Identification }).IsUnique(); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<DeliveryRoute>(configuration =>
+        {
+            configuration.ToTable("delivery_routes"); configuration.HasKey(x => x.Id); configuration.HasAlternateKey(x => new { x.OrganizationId, x.Id }); configuration.Ignore(x => x.Stops);
+            configuration.Property(x => x.DeliveryWindow).HasMaxLength(80).IsRequired(); configuration.Property(x => x.DriverNameSnapshot).HasMaxLength(160).IsRequired(); configuration.Property(x => x.Version).IsConcurrencyToken();
+            configuration.HasOne<DeliveryDriver>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DriverId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<DeliveryRouteStop>("_stops").WithOne().HasForeignKey(x => new { x.OrganizationId, x.RouteId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.Navigation("_stops").UsePropertyAccessMode(PropertyAccessMode.Field); configuration.HasIndex(x => new { x.OrganizationId, x.Date, x.Status }); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<DeliveryRouteStop>(configuration =>
+        {
+            configuration.ToTable("delivery_route_stops"); configuration.HasKey(x => x.Id); configuration.HasAlternateKey(x => new { x.OrganizationId, x.Id });
+            configuration.Property(x => x.CustomerNameSnapshot).HasMaxLength(160).IsRequired(); configuration.Property(x => x.CustomerPhoneSnapshot).HasMaxLength(30); configuration.Property(x => x.AddressSnapshot).HasMaxLength(1000).IsRequired();
+            configuration.HasOne<Order>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.OrderId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(x => new { x.OrganizationId, x.RouteId, x.Position }).IsUnique(); configuration.HasIndex(x => new { x.OrganizationId, x.RouteId, x.OrderId }).IsUnique(); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<DeliveryAttempt>(configuration =>
+        {
+            configuration.ToTable("delivery_attempts"); configuration.HasKey(x => x.Id); configuration.Property(x => x.DriverNameSnapshot).HasMaxLength(160).IsRequired(); configuration.Property(x => x.FailureReason).HasMaxLength(500); configuration.Property(x => x.Note).HasMaxLength(4000); configuration.Property(x => x.ReceivedBy).HasMaxLength(160); configuration.Property(x => x.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.HasOne<DeliveryRouteStop>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.RouteStopId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(x => new { x.OrganizationId, x.RouteStopId }).IsUnique(); configuration.HasIndex(x => new { x.OrganizationId, x.IdempotencyKey }).IsUnique(); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<DeliveryReschedule>(configuration =>
+        {
+            configuration.ToTable("delivery_reschedules"); configuration.HasKey(x => x.Id); configuration.Property(x => x.PreviousWindow).HasMaxLength(80).IsRequired(); configuration.Property(x => x.NewWindow).HasMaxLength(80).IsRequired(); configuration.Property(x => x.Reason).HasMaxLength(1000).IsRequired(); configuration.Property(x => x.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.HasOne<Order>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.OrderId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(x => new { x.OrganizationId, x.IdempotencyKey }).IsUnique(); configuration.HasIndex(x => new { x.OrganizationId, x.OrderId, x.OccurredAt }); configuration.HasQueryFilter(x => x.OrganizationId == organizationContext.OrganizationId);
+        });
 
         modelBuilder.Entity<Organization>(configuration =>
         {
@@ -792,7 +832,7 @@ public sealed class AppDbContext : DbContext
         }
 
         var candidates = ChangeTracker.Entries()
-            .Where(entry => entry.State == EntityState.Added)
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
             .Select(entry => entry.Entity switch
             {
                 OrderConfirmationAudit audit => ("Order.Confirmed", "Order", audit.OrderId),
@@ -801,6 +841,9 @@ public sealed class AppDbContext : DbContext
                 FinancialCreditMovement movement => ($"FinancialCredit.{movement.Type}", "FinancialCreditMovement", movement.Id),
                 PackingRecord packing => ("Order.Packed", "Order", packing.OrderId),
                 LabelPrintAttempt attempt => ($"LabelPrint.{attempt.Status}", "PackingRecord", attempt.PackingRecordId),
+                DeliveryRoute route => ($"DeliveryRoute.{route.Status}", "DeliveryRoute", route.Id),
+                DeliveryAttempt attempt => ($"DeliveryAttempt.{attempt.Result}", "Order", attempt.OrderId),
+                DeliveryReschedule reschedule => ("Delivery.Rescheduled", "Order", reschedule.OrderId),
                 _ => default,
             })
             .Where(candidate => candidate.Item3 != Guid.Empty)
