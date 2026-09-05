@@ -4,6 +4,7 @@ using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Production;
+using Ts.Api.Domain.Customers;
 
 namespace Ts.Api.Application.Orders;
 
@@ -66,6 +67,7 @@ public sealed record OrderAuthoringOfferResult(
     bool RequiresMenuChoice = false);
 
 public sealed record OrderAuthoringProducibleResult(Guid Id, string Name);
+public sealed record OrderAuthoringCustomerResult(Guid Id, string Name, string Phone);
 public sealed record OrderAuthoringMenuOptionResult(Guid Id, string Category, Guid ProducibleItemId,
     string ProducibleItemName, MenuAvailability Availability);
 
@@ -80,6 +82,7 @@ public sealed record OrderAuthoringFrozenConfigurationResult(
     DateOnly? NextExpiration);
 
 public sealed record OrderAuthoringContextResult(
+    IReadOnlyCollection<OrderAuthoringCustomerResult> Customers,
     IReadOnlyCollection<OrderAuthoringOfferResult> Offers,
     IReadOnlyCollection<OrderAuthoringProducibleResult> Producibles,
     IReadOnlyCollection<OrderAuthoringFrozenConfigurationResult> FrozenConfigurations,
@@ -90,6 +93,7 @@ public interface IOrderQueryStore
     Task<IReadOnlyList<Order>> GetOrdersAsync(CancellationToken cancellationToken);
     Task<Order?> FindOrderDetailsAsync(Guid orderId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogOffer>> GetActiveOffersAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<Customer>> GetActiveCustomersAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<Customer>>([]);
     Task<IReadOnlyList<ProducibleItem>> GetActiveProduciblesAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<FrozenConfiguration>> GetActiveFrozenConfigurationsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<FrozenLot>> GetSellableFrozenLotsAsync(DateOnly sellableOn, CancellationToken cancellationToken);
@@ -144,6 +148,7 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
     public async Task<OrderAuthoringContextResult> HandleAsync(DateOnly sellableOn, CancellationToken cancellationToken)
     {
         var offers = await store.GetActiveOffersAsync(cancellationToken);
+        var customers = await store.GetActiveCustomersAsync(cancellationToken);
         var producibles = await store.GetActiveProduciblesAsync(cancellationToken);
         var configurations = await store.GetActiveFrozenConfigurationsAsync(cancellationToken);
         var lots = await store.GetSellableFrozenLotsAsync(sellableOn, cancellationToken);
@@ -155,6 +160,7 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
             : offers.Where(x => x.FulfillmentMode == OfferFulfillmentMode.FrozenStock || (dailyOffers?.ContainsKey(x.Id) ?? false)).ToArray();
 
         return new OrderAuthoringContextResult(
+            customers.Select(item => new OrderAuthoringCustomerResult(item.Id, item.Name, item.Phone)).ToArray(),
             visibleOffers.Select(item => new OrderAuthoringOfferResult(item.Id, item.Name, item.FulfillmentMode,
                 dailyOffers?.GetValueOrDefault(item.Id)?.EffectivePrice, item.RequiresMenuChoice)).ToArray(),
             producibles.Select(item => new OrderAuthoringProducibleResult(item.Id, item.Name)).ToArray(),

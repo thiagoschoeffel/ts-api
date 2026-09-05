@@ -4,6 +4,7 @@ using Ts.Api.Domain.Common;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Production;
+using Ts.Api.Domain.Customers;
 
 namespace Ts.Api.Application.Orders;
 
@@ -16,6 +17,8 @@ public interface IOrderManagementStore
     Task<Order?> FindByCreationKeyAsync(string idempotencyKey, CancellationToken cancellationToken);
     Task<Order?> FindByModificationKeyAsync(string idempotencyKey, CancellationToken cancellationToken);
     Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken);
+    Task<Customer?> FindActiveCustomerAsync(Guid customerId, CancellationToken cancellationToken) => Task.FromResult<Customer?>(null);
+    Task<bool> EnforcesCustomersAsync(CancellationToken cancellationToken) => Task.FromResult(false);
     Task<CatalogOffer?> FindActiveOfferAsync(Guid offerId, CancellationToken cancellationToken);
     Task<FrozenConfiguration?> FindActiveFrozenConfigurationAsync(
         Guid configurationId,
@@ -69,6 +72,10 @@ public sealed class CreateOrderHandler(
             return OrderResultMapper.Map(previous);
         }
 
+        var customer = await store.FindActiveCustomerAsync(command.CustomerId, cancellationToken);
+        if (customer is null && await store.EnforcesCustomersAsync(cancellationToken))
+            throw new DomainException("O cliente informado não existe ou está inativo.");
+
         var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
         var order = Order.CreateDraft(
             organizationContext.OrganizationId,
@@ -76,7 +83,7 @@ public sealed class CreateOrderHandler(
             command.OperationalDate,
             definitions,
             idempotencyKey,
-            command.CustomerName);
+            customer?.Name ?? command.CustomerName);
         await store.AddAsync(order, cancellationToken);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
@@ -139,9 +146,13 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
             throw new ConflictException("O pedido foi alterado. Recarregue os dados antes de editar.");
         }
 
+        var customer = await store.FindActiveCustomerAsync(command.CustomerId, cancellationToken);
+        if (customer is null && await store.EnforcesCustomersAsync(cancellationToken))
+            throw new DomainException("O cliente informado não existe ou está inativo.");
+
         var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
         var previousItems = order.Items.ToArray();
-        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, command.CustomerName);
+        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, customer?.Name ?? command.CustomerName);
         store.ReplaceItems(previousItems, order.Items);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);

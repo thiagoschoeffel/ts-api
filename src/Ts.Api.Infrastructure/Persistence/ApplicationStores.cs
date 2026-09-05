@@ -409,14 +409,14 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
         .ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<PlanAcquisition>> FindEligiblePlanAcquisitionsAsync(
-        Guid customerId,
-        Guid offerId,
-        CancellationToken cancellationToken) => await database.PlanAcquisitions
-        .Include("_movements")
-        .Where(item => item.CustomerId == customerId && item.EligibleOfferId == offerId)
-        .OrderBy(item => item.AcquiredOn)
-        .ThenBy(item => item.Id)
-        .ToListAsync(cancellationToken);
+        Guid customerId, Guid offerId, CancellationToken cancellationToken)
+    {
+        var candidates = await database.PlanAcquisitions.Include("_movements")
+            .Where(item => item.CustomerId == customerId)
+            .OrderBy(item => item.AcquiredOn).ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        return candidates.Where(item => item.IsEligibleFor(offerId)).ToArray();
+    }
 
     public async Task<decimal> GetFinancialCreditBalanceAsync(
         Guid customerId,
@@ -614,6 +614,10 @@ public sealed class OrderManagementStore(AppDbContext database) :
     public Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken) =>
         OrdersWithItems().SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken);
 
+    public Task<Customer?> FindActiveCustomerAsync(Guid customerId, CancellationToken cancellationToken) =>
+        database.Customers.SingleOrDefaultAsync(item => item.Id == customerId && item.IsActive, cancellationToken);
+    public Task<bool> EnforcesCustomersAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+
     public Task<CatalogOffer?> FindActiveOfferAsync(
         Guid offerId,
         CancellationToken cancellationToken) => database.CatalogOffers.SingleOrDefaultAsync(
@@ -709,6 +713,9 @@ public sealed class OrderQueryStore(AppDbContext database) : IOrderQueryStore
 
     public async Task<IReadOnlyList<CatalogOffer>> GetActiveOffersAsync(CancellationToken cancellationToken) =>
         await database.CatalogOffers.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<Customer>> GetActiveCustomersAsync(CancellationToken cancellationToken) =>
+        await database.Customers.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<ProducibleItem>> GetActiveProduciblesAsync(CancellationToken cancellationToken) =>
         await database.ProducibleItems.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);

@@ -50,9 +50,16 @@ public sealed class AppDbContext : DbContext
     public DbSet<ProducibleComposition> ProducibleCompositions => Set<ProducibleComposition>();
     public DbSet<ProducibleComponent> ProducibleComponents => Set<ProducibleComponent>();
     public DbSet<CustomerDietaryRestriction> CustomerDietaryRestrictions => Set<CustomerDietaryRestriction>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
+    public DbSet<CustomerPreference> CustomerPreferences => Set<CustomerPreference>();
+    public DbSet<CommercialPlan> CommercialPlans => Set<CommercialPlan>();
+    public DbSet<CommercialPlanOffer> CommercialPlanOffers => Set<CommercialPlanOffer>();
     public DbSet<PlanAcquisition> PlanAcquisitions => Set<PlanAcquisition>();
     public DbSet<PlanCreditMovement> PlanCreditMovements => Set<PlanCreditMovement>();
     public DbSet<FinancialCreditMovement> FinancialCreditMovements => Set<FinancialCreditMovement>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<PaymentAllocation> PaymentAllocations => Set<PaymentAllocation>();
     public DbSet<OrderItemComponent> OrderItemComponents => Set<OrderItemComponent>();
     public DbSet<OrderPlanCreditAllocation> OrderPlanCreditAllocations => Set<OrderPlanCreditAllocation>();
     public DbSet<OrderConfirmationAudit> OrderConfirmationAudits => Set<OrderConfirmationAudit>();
@@ -369,6 +376,10 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(item => item.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<Customer>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.CustomerId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             configuration.Property(item => item.ConfirmationIdempotencyKey).HasMaxLength(200);
             configuration.Property(item => item.CreationIdempotencyKey).HasMaxLength(200).IsRequired();
             configuration.Property(item => item.LastModificationIdempotencyKey).HasMaxLength(200);
@@ -483,6 +494,7 @@ public sealed class AppDbContext : DbContext
         {
             configuration.ToTable("order_charges");
             configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
             configuration.Property(item => item.Amount).HasPrecision(12, 2);
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
@@ -515,6 +527,60 @@ public sealed class AppDbContext : DbContext
 
     private void ConfigureConfirmationCommerce(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<Customer>(configuration =>
+        {
+            configuration.ToTable("customers"); configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.Phone).HasMaxLength(15).IsRequired();
+            configuration.Property(item => item.Notes).HasMaxLength(4_000);
+            configuration.Property(item => item.PreferredDeliveryDriverId).HasMaxLength(100);
+            configuration.Property(item => item.PreferredPaymentCondition).HasMaxLength(80);
+            configuration.Property(item => item.PreferredPaymentMethod).HasMaxLength(80);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.Phone }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<CustomerAddress>(configuration =>
+        {
+            configuration.ToTable("customer_addresses"); configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Label).HasMaxLength(80).IsRequired();
+            configuration.Property(item => item.Street).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.Number).HasMaxLength(30); configuration.Property(item => item.Complement).HasMaxLength(120);
+            configuration.Property(item => item.Neighborhood).HasMaxLength(120); configuration.Property(item => item.City).HasMaxLength(120);
+            configuration.Property(item => item.State).HasMaxLength(2); configuration.Property(item => item.PostalCode).HasMaxLength(10);
+            configuration.Property(item => item.ReferencePoint).HasMaxLength(300);
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.CustomerId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<CustomerPreference>(configuration =>
+        {
+            configuration.ToTable("customer_preferences"); configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Description).HasMaxLength(500).IsRequired();
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.CustomerId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<CommercialPlan>(configuration =>
+        {
+            configuration.ToTable("commercial_plans"); configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.Name).HasMaxLength(160).IsRequired(); configuration.Property(item => item.Description).HasMaxLength(4_000);
+            configuration.Property(item => item.BenefitDescription).HasMaxLength(500).IsRequired(); configuration.Property(item => item.DefaultPrice).HasPrecision(12, 2);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.Name }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<CommercialPlanOffer>(configuration =>
+        {
+            configuration.ToTable("commercial_plan_offers"); configuration.HasKey(item => new { item.OrganizationId, item.PlanId, item.OfferId });
+            configuration.HasOne<CommercialPlan>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.PlanId }).HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.HasOne<CatalogOffer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.OfferId }).HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
         modelBuilder.Entity<ProducibleComposition>(configuration =>
         {
             configuration.ToTable("producible_compositions");
@@ -555,6 +621,8 @@ public sealed class AppDbContext : DbContext
             configuration.Property(item => item.Marker).HasMaxLength(80).IsRequired();
             configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.CustomerId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Cascade);
             configuration.HasIndex(item => new { item.OrganizationId, item.CustomerId, item.Marker }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
@@ -565,9 +633,17 @@ public sealed class AppDbContext : DbContext
             configuration.HasKey(item => item.Id);
             configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
             configuration.Property(item => item.PlanName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.BenefitDescriptionSnapshot).HasMaxLength(500).IsRequired();
             configuration.Property(item => item.BenefitAmountPerCredit).HasPrecision(12, 2);
+            configuration.Property(item => item.CustomerNameSnapshot).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.CompatibleOfferIds).HasMaxLength(4_000).IsRequired();
+            configuration.Property(item => item.PaidAmount).HasPrecision(12, 2);
             configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.CustomerId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<CommercialPlan>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.PlanId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
             configuration.HasOne<CatalogOffer>().WithMany()
                 .HasForeignKey(item => new { item.OrganizationId, item.EligibleOfferId })
                 .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
@@ -597,6 +673,10 @@ public sealed class AppDbContext : DbContext
             configuration.Property(item => item.Reason).HasMaxLength(500).IsRequired();
             configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.CustomerId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<Payment>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.PaymentId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
             configuration.HasOne<Order>().WithMany()
                 .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
                 .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
@@ -605,6 +685,27 @@ public sealed class AppDbContext : DbContext
             configuration.HasIndex(item => new { item.OrganizationId, item.CustomerId, item.OccurredAt });
             configuration.HasIndex(item => new { item.OrganizationId, item.OrderId })
                 .IsUnique().HasFilter("\"OrderId\" IS NOT NULL AND \"Type\" = 1");
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<Payment>(configuration =>
+        {
+            configuration.ToTable("payments"); configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.CustomerNameSnapshot).HasMaxLength(160).IsRequired(); configuration.Property(item => item.Amount).HasPrecision(12, 2);
+            configuration.Property(item => item.Reference).HasMaxLength(1_000); configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.HasOne<Customer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.CustomerId }).HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.RecordedBy).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+        modelBuilder.Entity<PaymentAllocation>(configuration =>
+        {
+            configuration.ToTable("payment_allocations"); configuration.HasKey(item => item.Id); configuration.Property(item => item.Amount).HasPrecision(12, 2);
+            configuration.HasOne<Payment>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.PaymentId }).HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<OrderCharge>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.ChargeId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.PaymentId, item.ChargeId }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
