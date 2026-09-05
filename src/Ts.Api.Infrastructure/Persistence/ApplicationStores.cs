@@ -5,16 +5,81 @@ using Ts.Api.Application.Catalog;
 using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
+using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.Customers;
 using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
+using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Plans;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
+
+public sealed class OperationsStore(AppDbContext database) : IOperationsStore
+{
+    public async Task<IReadOnlyList<Order>> GetOperationalOrdersAsync(
+        DateOnly date, CancellationToken cancellationToken) => await database.Orders
+        .Include("_items").Include("_componentSnapshots").Include("_lifecycleEvents")
+        .AsSplitQuery().Where(item => item.OperationalDate == date)
+        .OrderBy(item => item.Id).ToListAsync(cancellationToken);
+
+    public Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken) => database.Orders
+        .Include("_items").Include("_componentSnapshots").Include("_lifecycleEvents")
+        .AsSplitQuery().SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+
+    public Task<PackingRecord?> FindPackingByOrderAsync(Guid orderId, CancellationToken cancellationToken) =>
+        database.PackingRecords.SingleOrDefaultAsync(item => item.OrderId == orderId, cancellationToken);
+
+    public Task<PackingRecord?> FindPackingByKeyAsync(string idempotencyKey, CancellationToken cancellationToken) =>
+        database.PackingRecords.SingleOrDefaultAsync(item => item.IdempotencyKey == idempotencyKey, cancellationToken);
+
+    public Task<LabelPrintAttempt?> FindPrintAttemptByKeyAsync(string idempotencyKey, CancellationToken cancellationToken) =>
+        database.LabelPrintAttempts.SingleOrDefaultAsync(item => item.IdempotencyKey == idempotencyKey, cancellationToken);
+
+    public async Task<IReadOnlyList<PackingRecord>> GetPackingsAsync(
+        IReadOnlyCollection<Guid> orderIds, CancellationToken cancellationToken) => await database.PackingRecords
+        .Where(item => orderIds.Contains(item.OrderId)).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<LabelPrintAttempt>> GetPrintAttemptsAsync(
+        IReadOnlyCollection<Guid> packingIds, CancellationToken cancellationToken) => await database.LabelPrintAttempts
+        .Where(item => packingIds.Contains(item.PackingRecordId)).OrderByDescending(item => item.AttemptedAt)
+        .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyDictionary<Guid, string>> GetUserNamesAsync(
+        IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken) => await database.Users
+        .Where(item => userIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+
+    public async Task<T> ExecuteSerializableAsync<T>(
+        Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
+    {
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        try
+        {
+            var result = await operation(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        catch (Exception exception) when (exception is DbUpdateConcurrencyException
+            or DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } })
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw new ConflictException("A embalagem conflitou com outra operação. Recarregue a fila e tente novamente.");
+        }
+    }
+
+    public void Add(PackingRecord record) => database.PackingRecords.Add(record);
+    public void Add(LabelPrintAttempt attempt) => database.LabelPrintAttempts.Add(attempt);
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        foreach (var entry in database.ChangeTracker.Entries<OrderLifecycleEvent>()
+                     .Where(entry => entry.State == EntityState.Modified)) entry.State = EntityState.Added;
+        return database.SaveChangesAsync(cancellationToken);
+    }
+}
 
 public sealed class CatalogOfferStore(AppDbContext database) : ICatalogOfferStore
 {

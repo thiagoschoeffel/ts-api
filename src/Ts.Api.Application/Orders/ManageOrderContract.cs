@@ -14,7 +14,8 @@ public sealed record CreateOrderCommand(
     Guid CustomerId,
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemInput> Items,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    string? CustomerName = null);
 
 public sealed record EditOrderCommand(
     Guid OrderId,
@@ -22,7 +23,8 @@ public sealed record EditOrderCommand(
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemInput> Items,
     long ExpectedVersion,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    string? CustomerName = null);
 
 public sealed record OrderResult(
     Guid Id,

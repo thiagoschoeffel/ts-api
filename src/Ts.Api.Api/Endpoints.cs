@@ -2,10 +2,12 @@ using Ts.Api.Application.Catalog;
 using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
+using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
+using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Production;
 using Ts.Api.Infrastructure.Persistence;
@@ -70,6 +72,16 @@ public static class Endpoints
             .WithName("EditOrder");
         api.MapGet("/orders/{orderId:guid}", GetOrderDetailsAsync)
             .WithName("GetOrder");
+        api.MapGet("/operations/production", GetProductionSnapshotAsync)
+            .WithName("GetProductionSnapshot");
+        api.MapGet("/operations/packing", GetPackingQueueAsync)
+            .WithName("GetPackingQueue");
+        api.MapPost("/operations/packing/{orderId:guid}", PackOrderAsync)
+            .RequireAuthorization(AuthorizationPolicies.Operate)
+            .WithName("PackOrder");
+        api.MapPost("/operations/packing/{orderId:guid}/print-attempts", RecordLabelPrintAsync)
+            .RequireAuthorization(AuthorizationPolicies.Operate)
+            .WithName("RecordLabelPrint");
         api.MapPut("/daily-capacities/{operationalDate}", ConfigureDailyCapacityAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
             .WithName("ConfigureDailyCapacity");
@@ -325,7 +337,8 @@ public static class Endpoints
                 request.CustomerId,
                 request.OperationalDate,
                 request.Items.Select(MapOrderItem).ToArray(),
-                idempotencyKeyResult.Value!),
+                idempotencyKeyResult.Value!,
+                request.CustomerName),
             cancellationToken);
         return TypedResults.Created($"/api/orders/{result.Id}", result);
     }
@@ -350,7 +363,8 @@ public static class Endpoints
                 request.OperationalDate,
                 request.Items.Select(MapOrderItem).ToArray(),
                 request.ExpectedVersion,
-                idempotencyKeyResult.Value!),
+                idempotencyKeyResult.Value!,
+                request.CustomerName),
             cancellationToken);
         return TypedResults.Ok(result);
     }
@@ -371,6 +385,50 @@ public static class Endpoints
         GetOrderDetailsHandler handler,
         CancellationToken cancellationToken) =>
         TypedResults.Ok(await handler.HandleAsync(orderId, cancellationToken));
+
+    private static async Task<IResult> GetProductionSnapshotAsync(
+        DateOnly? operationalDate,
+        GetProductionSnapshotHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(
+            operationalDate ?? DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken));
+
+    private static async Task<IResult> GetPackingQueueAsync(
+        DateOnly? operationalDate,
+        GetPackingQueueHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(
+            operationalDate ?? DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken));
+
+    private static async Task<IResult> PackOrderAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        PackOrderRequest request,
+        PackOrderHandler handler,
+        ICurrentUserContext currentUser,
+        CancellationToken cancellationToken)
+    {
+        var key = ReadIdempotencyKey(httpContext);
+        if (key.Error is not null) return key.Error;
+        return TypedResults.Ok(await handler.HandleAsync(
+            new PackOrderCommand(orderId, request.ExpectedVersion, currentUser.UserId, key.Value!), cancellationToken));
+    }
+
+    private static async Task<IResult> RecordLabelPrintAsync(
+        Guid orderId,
+        HttpContext httpContext,
+        RecordLabelPrintRequest request,
+        RecordLabelPrintHandler handler,
+        ICurrentUserContext currentUser,
+        CancellationToken cancellationToken)
+    {
+        var key = ReadIdempotencyKey(httpContext);
+        if (key.Error is not null) return key.Error;
+        return TypedResults.Ok(await handler.HandleAsync(new RecordLabelPrintCommand(
+            orderId,
+            new PackingLabelSelection(request.DailyItemLabelIds, request.IncludeExternalPackageLabel),
+            request.Status, request.ErrorMessage, currentUser.UserId, key.Value!), cancellationToken));
+    }
 
     private static async Task<IResult> ConfigureDailyCapacityAsync(
         DateOnly operationalDate,
@@ -523,13 +581,15 @@ public sealed record PlanCreditRequestBody(Guid OrderItemId, int Quantity);
 public sealed record CreateOrderRequest(
     Guid CustomerId,
     DateOnly OperationalDate,
-    IReadOnlyCollection<OrderItemRequest> Items);
+    IReadOnlyCollection<OrderItemRequest> Items,
+    string? CustomerName = null);
 
 public sealed record EditOrderRequest(
     Guid CustomerId,
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemRequest> Items,
-    long ExpectedVersion);
+    long ExpectedVersion,
+    string? CustomerName = null);
 
 public sealed record OrderItemRequest(
     Guid OfferId,
@@ -537,6 +597,14 @@ public sealed record OrderItemRequest(
     decimal? UnitPrice = null,
     Guid? FrozenConfigurationId = null,
     Guid? ProducibleItemId = null);
+
+public sealed record PackOrderRequest(long ExpectedVersion);
+
+public sealed record RecordLabelPrintRequest(
+    IReadOnlyCollection<string> DailyItemLabelIds,
+    bool IncludeExternalPackageLabel,
+    LabelPrintStatus Status,
+    string? ErrorMessage = null);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 

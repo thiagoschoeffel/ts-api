@@ -32,6 +32,7 @@ public sealed class Order : ITenantOwned
     public Guid Id { get; private set; }
     public Guid OrganizationId { get; private set; }
     public Guid CustomerId { get; private set; }
+    public string CustomerNameSnapshot { get; private set; } = string.Empty;
     public DateOnly OperationalDate { get; private set; }
     public OrderStatus Status { get; private set; }
     public long Version { get; private set; }
@@ -57,7 +58,8 @@ public sealed class Order : ITenantOwned
         Guid customerId,
         DateOnly operationalDate,
         IReadOnlyCollection<OrderItemDefinition> items,
-        string? creationIdempotencyKey = null)
+        string? creationIdempotencyKey = null,
+        string? customerNameSnapshot = null)
     {
         if (organizationId == Guid.Empty)
         {
@@ -78,6 +80,7 @@ public sealed class Order : ITenantOwned
             ? $"internal-{Guid.NewGuid():N}"
             : NormalizeIdempotencyKey(creationIdempotencyKey);
         var order = new Order(organizationId, customerId, operationalDate, normalizedKey);
+        order.CustomerNameSnapshot = NormalizeCustomerName(customerId, customerNameSnapshot);
         order.ReplaceItems(items);
 
         return order;
@@ -87,7 +90,8 @@ public sealed class Order : ITenantOwned
         Guid customerId,
         DateOnly operationalDate,
         IReadOnlyCollection<OrderItemDefinition> items,
-        string idempotencyKey)
+        string idempotencyKey,
+        string? customerNameSnapshot = null)
     {
         if (Status != OrderStatus.Open)
         {
@@ -105,6 +109,7 @@ public sealed class Order : ITenantOwned
         }
 
         CustomerId = customerId;
+        CustomerNameSnapshot = NormalizeCustomerName(customerId, customerNameSnapshot);
         OperationalDate = operationalDate;
         ReplaceItems(items);
         LastModificationIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
@@ -365,6 +370,15 @@ public sealed class Order : ITenantOwned
                 item.ProducibleItemName,
                 item.FrozenPresentation));
         }
+    }
+
+    private static string NormalizeCustomerName(Guid customerId, string? value)
+    {
+        var normalized = value?.Trim();
+        if (normalized?.Length > 160) throw new DomainException("O nome do cliente deve possuir até 160 caracteres.");
+        return string.IsNullOrWhiteSpace(normalized)
+            ? $"Cliente {customerId.ToString("N")[..8].ToUpperInvariant()}"
+            : normalized;
     }
 
     private static string NormalizeIdempotencyKey(string idempotencyKey)
