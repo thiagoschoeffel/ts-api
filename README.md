@@ -94,9 +94,25 @@ O PostgreSQL fica acessível apenas em `127.0.0.1:5433` por padrão, configuráv
 
 ```bash
 dotnet restore
-dotnet test
-dotnet build --configuration Release
+dotnet test --no-restore --disable-build-servers -m:1
+dotnet build --configuration Release --no-restore --disable-build-servers -m:1
 ```
+
+Os testes de persistência atuais usam EF Core InMemory. Eles validam regras e mapeamentos exercitados pela suíte, mas não substituem a aplicação das migrations em PostgreSQL real.
+
+Em ambientes Codex restritos, execute o `dotnet test` com permissão ampliada, pois o VSTest abre um socket local. Execute comandos `docker compose` da mesma forma para acessar o socket do Docker. Uma falha `SocketException (13): Permission denied` durante a inicialização do runner indica bloqueio do sandbox, não falha dos testes.
+
+## Validar migrations
+
+Para qualquer mudança de persistência:
+
+1. inicie somente o serviço `postgres` do `compose.yaml`;
+2. crie um banco temporário com nome exclusivo para a execução;
+3. aponte `ConnectionStrings__Database` para esse banco e aplique toda a cadeia de migrations;
+4. registre separadamente o resultado da suíte e o resultado da migration;
+5. remova apenas o banco temporário ao terminar.
+
+Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco persistente de desenvolvimento não deve ser usado como banco descartável de teste.
 
 ## Decisões
 
