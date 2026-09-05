@@ -43,4 +43,6 @@
 - Antes da primeira alteração, crie a mesma branch de trabalho em todos os repositórios afetados, no formato `feat/eNN-descricao-curta`. Nunca implemente um épico em `main` ou `master`.
 - Se já houver commits do épico na branch protegida local, preserve-os criando a branch de trabalho no `HEAD` atual; não faça reset nem descarte alterações para corrigir o fluxo.
 - Ao concluir, valide, atualize a documentação, crie um commit convencional e coeso por repositório afetado, publique somente as branches de trabalho e abra ou atualize o pull request. Nunca faça push direto para `main` ou `master`.
-- Um épico só pode ser marcado como concluído após todos os pushes das branches e pull requests correspondentes; falha de commit, push ou criação do PR mantém o épico em andamento.
+- Depois de abrir ou atualizar todos os pull requests do épico, integre-os sem exigir ação manual do usuário. Faça o merge imediatamente quando permitido; se checks ou proteções ainda estiverem pendentes, habilite o auto-merge e acompanhe até a integração ser confirmada.
+- Após confirmar todos os merges, faça checkout de `main` em cada repositório afetado e atualize-a por fast-forward a partir de `origin/main`, deixando o workspace pronto para o próximo épico.
+- Um épico só pode ser marcado como concluído após todos os pushes, merges e retornos à `main` atualizada; falha de commit, push, criação ou merge do PR, ou de retorno seguro à `main`, mantém o épico em andamento.
