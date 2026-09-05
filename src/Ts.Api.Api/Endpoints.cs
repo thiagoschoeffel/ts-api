@@ -5,6 +5,7 @@ using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
+using Ts.Api.Application.Commerce;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Menus;
@@ -118,6 +119,15 @@ public static class Endpoints
         api.MapPost("/financial-credits", GrantFinancialCreditAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
             .WithName("GrantFinancialCredit");
+        api.MapGet("/commerce", GetCommerceAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("GetCommerce");
+        api.MapPost("/customers", CreateCustomerAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateCustomer");
+        api.MapPut("/customers/{id:guid}", UpdateCustomerAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateCustomer");
+        api.MapPost("/plans", CreatePlanAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreatePlan");
+        api.MapPut("/plans/{id:guid}", UpdatePlanAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdatePlan");
+        api.MapPost("/plans/acquisitions/authoritative", CreateAuthoritativeAcquisitionAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateAuthoritativePlanAcquisition");
+        api.MapPost("/plan-credit-adjustments", AdjustPlanCreditAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("AdjustPlanCredit");
+        api.MapPost("/financial-credit-adjustments", AdjustFinancialCreditAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("AdjustFinancialCredit");
+        api.MapPost("/payments", RegisterPaymentAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("RegisterPayment");
 
         return endpoints;
     }
@@ -567,6 +577,29 @@ public static class Endpoints
         var result = await handler.HandleAsync(new GrantFinancialCreditCommand(
             request.CustomerId, request.Amount, request.Reason, currentUser.UserId), cancellationToken);
         return TypedResults.Created($"/api/financial-credits/{result.Id}", result);
+    }
+
+    private static async Task<IResult> GetCommerceAsync(CommerceService service, CancellationToken token) =>
+        TypedResults.Ok(await service.GetAsync(token));
+    private static async Task<IResult> CreateCustomerAsync(CustomerInput request, CommerceService service, CancellationToken token)
+    { var id = await service.SaveCustomerAsync(null, request, token); return TypedResults.Created($"/api/customers/{id}", new { id }); }
+    private static async Task<IResult> UpdateCustomerAsync(Guid id, CustomerInput request, CommerceService service, CancellationToken token)
+    { await service.SaveCustomerAsync(id, request, token); return TypedResults.NoContent(); }
+    private static async Task<IResult> CreatePlanAsync(PlanInput request, CommerceService service, CancellationToken token)
+    { var id = await service.SavePlanAsync(null, request, token); return TypedResults.Created($"/api/plans/{id}", new { id }); }
+    private static async Task<IResult> UpdatePlanAsync(Guid id, PlanInput request, CommerceService service, CancellationToken token)
+    { await service.SavePlanAsync(id, request, token); return TypedResults.NoContent(); }
+    private static async Task<IResult> CreateAuthoritativeAcquisitionAsync(AcquisitionInput request, CommerceService service, CancellationToken token)
+    { var id = await service.AcquireAsync(request, token); return TypedResults.Created($"/api/plans/acquisitions/{id}", new { id }); }
+    private static async Task<IResult> AdjustPlanCreditAsync(CreditAdjustmentInput request, CommerceService service, CancellationToken token)
+    { await service.AdjustCreditAsync(request, token); return TypedResults.NoContent(); }
+    private static async Task<IResult> AdjustFinancialCreditAsync(FinancialAdjustmentInput request, CommerceService service, CancellationToken token)
+    { await service.AdjustFinancialAsync(request, token); return TypedResults.NoContent(); }
+    private static async Task<IResult> RegisterPaymentAsync(HttpContext context, PaymentInput request, CommerceService service, CancellationToken token)
+    {
+        var (key, error) = ReadIdempotencyKey(context); if (error is not null) return error;
+        var payment = await service.PayAsync(request, key!, token);
+        return TypedResults.Created($"/api/payments/{payment.Id}", new { payment.Id });
     }
 
     private static OrderItemInput MapOrderItem(OrderItemRequest item) => new(

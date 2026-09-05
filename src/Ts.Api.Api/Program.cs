@@ -11,6 +11,7 @@ using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
+using Ts.Api.Application.Commerce;
 using Ts.Api.Infrastructure;
 using Ts.Api.Infrastructure.Persistence;
 using Ts.Api.Domain.Organizations;
@@ -101,6 +102,7 @@ builder.Services.AddScoped<PublishCompositionHandler>();
 builder.Services.AddScoped<AddCustomerRestrictionHandler>();
 builder.Services.AddScoped<CreatePlanAcquisitionHandler>();
 builder.Services.AddScoped<GrantFinancialCreditHandler>();
+builder.Services.AddScoped<CommerceService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

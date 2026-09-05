@@ -2,10 +2,11 @@
 
 API autoritativa da Sabor Santè, construída em .NET 10 e organizada como monólito modular.
 
-> **Estado atual:** os épicos E02–E11 estão concluídos. A fundação autoritativa,
+> **Estado atual:** os épicos E02–E12 estão concluídos. A fundação autoritativa,
 > o ciclo transacional de Pedidos e as integrações de Congelados, Pedidos e
 > capacidade, Produção, Embalagem e histórico de impressão estão disponíveis.
 > Catálogo, Produzíveis, Cardápios e planejamento semanal também são persistidos pela API.
+> Clientes, Planos, créditos, cobranças, pagamentos e alocações agora compartilham a mesma fonte autoritativa.
 
 ## Estado atual
 
@@ -37,8 +38,11 @@ As fatias implementadas estabelecem:
 - configuração e consulta da capacidade diária, com saldo derivado, versão otimista e unicidade por Organização/data;
 - composição produzível versionada e snapshot dos componentes efetivos na confirmação;
 - restrições alimentares estruturadas validadas contra os marcadores da composição;
+- diretório de clientes com múltiplos endereços, preferências, restrições e versão otimista;
+- planos autoritativos com ofertas compatíveis e aquisições que preservam as condições contratadas;
 - aquisições de plano com ledger e consumo compatível por FIFO, rastreado por item e aquisição;
 - ledger de crédito financeiro, desconto auditado, taxa preservada e cobrança somente do saldo restante;
+- pagamentos idempotentes com alocação transacional em múltiplas cobranças e excedente lançado como crédito financeiro;
 - auditoria imutável das condições e efeitos comerciais da confirmação;
 - auditoria transacional de ações críticas com ator confiável, tenant, instante e correlação;
 - matriz explícita de transições operacionais do Pedido, com versão otimista, idempotência e trilha histórica;
@@ -78,8 +82,17 @@ POST /api/menus/import
 PUT  /api/menu-plans/{weekStart}
 GET  /api/menu-plans/{weekStart}
 POST /api/customers/{customerId}/dietary-restrictions
+POST /api/customers
+PUT  /api/customers/{customerId}
+GET  /api/commerce
+POST /api/plans
+PUT  /api/plans/{planId}
 POST /api/plans/acquisitions
+POST /api/plans/acquisitions/authoritative
+POST /api/plan-credit-adjustments
 POST /api/financial-credits
+POST /api/financial-credit-adjustments
+POST /api/payments
 POST /api/frozen-stock/configurations
 PUT  /api/frozen-stock/configurations/{configurationId}
 GET  /api/frozen-stock
@@ -111,7 +124,7 @@ Leituras aceitam qualquer associação ativa. Operações de Pedido e estoque ac
 
 A entrada de produção, o ajuste/descarte de congelados, a criação/edição do Pedido, a configuração de capacidade, a confirmação, a embalagem, o registro de impressão e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento, cancelamento e embalagem também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
 
-No Pedido, a modalidade vem da Oferta ativa. Itens diários aceitam somente Oferta e Item Produzível disponíveis no Cardápio publicado da data, e o preço informado precisa coincidir com o preço efetivo publicado. Itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa. Na confirmação, a versão mais recente da composição é consolidada no Pedido e validada contra as restrições do cliente. Esses snapshots permanecem estáveis mesmo que a composição mude depois. O `CustomerId` continua sendo uma identidade externa obrigatória até o domínio autoritativo de Clientes do E12; o nome usado na etiqueta já fica preservado no Pedido.
+No Pedido, a modalidade vem da Oferta ativa. Itens diários aceitam somente Oferta e Item Produzível disponíveis no Cardápio publicado da data, e o preço informado precisa coincidir com o preço efetivo publicado. Itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa. Na confirmação, a versão mais recente da composição é consolidada no Pedido e validada contra as restrições do cliente. Esses snapshots permanecem estáveis mesmo que a composição mude depois. O `CustomerId` precisa referenciar um cliente ativo da mesma Organização; nome, endereço e contato relevantes continuam preservados historicamente no Pedido.
 
 Produção agrega somente os componentes efetivos dos itens de produção diária em Pedidos confirmados ou em estágios posteriores da data consultada. Embalagem aceita Pedidos confirmados, em produção ou em embalagem, avança os estágios necessários numa transação serializável e persiste o snapshot antes de chamar a impressora. A estação envia ZPL 100 × 50 mm por Zebra Browser Print; depois registra na API o sucesso ou a falha. Reimpressões selecionam etiquetas do mesmo snapshot histórico, e a API rejeita identificadores alheios ao Pedido.
 
@@ -201,3 +214,4 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 9. integrar a Gestão de Congelados por meio de um adapter HTTP tipado e autenticado — concluído;
 10. integrar os fluxos autoritativos de Pedido e capacidade — concluído.
 11. integrar Produção, Embalagem e o adapter Zebra/ZPL — concluído.
+12. integrar Clientes, Planos, Créditos e Financeiro — concluído.

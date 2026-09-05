@@ -31,14 +31,33 @@ public sealed class FinancialCreditMovement : ITenantOwned
     public Guid ActorId { get; private set; }
     public DateTimeOffset OccurredAt { get; private set; }
     public Guid? OrderId { get; private set; }
+    public Guid? PaymentId { get; private set; }
     public decimal SignedAmount => Type is FinancialCreditMovementType.Granted
-        or FinancialCreditMovementType.Reversed ? Amount : -Amount;
+        or FinancialCreditMovementType.Reversed ? Amount
+        : Type == FinancialCreditMovementType.ManualAdjustment ? Amount : -Amount;
 
     public static FinancialCreditMovement Grant(
         Guid organizationId, Guid customerId, decimal amount, string reason,
         Guid actorId, DateTimeOffset occurredAt) =>
         Create(organizationId, customerId, FinancialCreditMovementType.Granted,
             amount, reason, actorId, occurredAt, null);
+
+    public static FinancialCreditMovement GrantFromPayment(Guid organizationId, Guid customerId, Guid paymentId,
+        decimal amount, Guid actorId, DateTimeOffset occurredAt)
+    {
+        var movement = Create(organizationId, customerId, FinancialCreditMovementType.Granted,
+            amount, "Excedente não alocado do pagamento", actorId, occurredAt, null);
+        movement.PaymentId = paymentId;
+        return movement;
+    }
+
+    public static FinancialCreditMovement ManualAdjustment(Guid organizationId, Guid customerId,
+        decimal signedAmount, string reason, Guid actorId, DateTimeOffset occurredAt)
+    {
+        if (signedAmount == 0) throw new DomainException("O ajuste financeiro não pode ser zero.");
+        return Create(organizationId, customerId, FinancialCreditMovementType.ManualAdjustment,
+            signedAmount, reason, actorId, occurredAt, null);
+    }
 
     public static FinancialCreditMovement Consume(
         Guid organizationId, Guid customerId, Guid orderId, decimal amount,
@@ -58,7 +77,7 @@ public sealed class FinancialCreditMovement : ITenantOwned
     {
         var normalizedReason = reason?.Trim() ?? string.Empty;
         if (organizationId == Guid.Empty || customerId == Guid.Empty || actorId == Guid.Empty
-            || amount <= 0 || normalizedReason.Length is 0 or > 500)
+            || amount == 0 || normalizedReason.Length is 0 or > 500)
         {
             throw new DomainException("Os dados da movimentação de crédito financeiro são inválidos.");
         }

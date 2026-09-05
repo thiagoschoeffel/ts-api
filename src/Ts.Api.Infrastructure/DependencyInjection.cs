@@ -7,6 +7,7 @@ using Ts.Api.Application.Orders;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
+using Ts.Api.Application.Commerce;
 using Ts.Api.Infrastructure.Persistence;
 
 namespace Ts.Api.Infrastructure;
@@ -37,6 +38,7 @@ public static class DependencyInjection
             provider => provider.GetRequiredService<OrderManagementStore>());
         services.AddScoped<IOrderQueryStore, OrderQueryStore>();
         services.AddScoped<IOperationsStore, OperationsStore>();
+        services.AddScoped<ICommerceStore, CommerceStore>();
         return services;
     }
 }
