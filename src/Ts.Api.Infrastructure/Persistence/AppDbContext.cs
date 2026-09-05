@@ -2,9 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using Ts.Api.Application.Common;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.Common;
+using Ts.Api.Domain.Customers;
+using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Orders;
+using Ts.Api.Domain.Plans;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
@@ -26,6 +29,15 @@ public sealed class AppDbContext(
     public DbSet<FrozenStockAllocation> FrozenStockAllocations => Set<FrozenStockAllocation>();
     public DbSet<OrderCharge> OrderCharges => Set<OrderCharge>();
     public DbSet<DailyCapacity> DailyCapacities => Set<DailyCapacity>();
+    public DbSet<ProducibleComposition> ProducibleCompositions => Set<ProducibleComposition>();
+    public DbSet<ProducibleComponent> ProducibleComponents => Set<ProducibleComponent>();
+    public DbSet<CustomerDietaryRestriction> CustomerDietaryRestrictions => Set<CustomerDietaryRestriction>();
+    public DbSet<PlanAcquisition> PlanAcquisitions => Set<PlanAcquisition>();
+    public DbSet<PlanCreditMovement> PlanCreditMovements => Set<PlanCreditMovement>();
+    public DbSet<FinancialCreditMovement> FinancialCreditMovements => Set<FinancialCreditMovement>();
+    public DbSet<OrderItemComponent> OrderItemComponents => Set<OrderItemComponent>();
+    public DbSet<OrderPlanCreditAllocation> OrderPlanCreditAllocations => Set<OrderPlanCreditAllocation>();
+    public DbSet<OrderConfirmationAudit> OrderConfirmationAudits => Set<OrderConfirmationAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -193,6 +205,9 @@ public sealed class AppDbContext(
             configuration.Ignore(item => item.Charges);
             configuration.Ignore(item => item.DailyCapacityUnits);
             configuration.Ignore(item => item.TotalAmount);
+            configuration.Ignore(item => item.ComponentSnapshots);
+            configuration.Ignore(item => item.PlanCreditAllocations);
+            configuration.Ignore(item => item.ConfirmationAudits);
             configuration.HasMany<OrderItem>("_items")
                 .WithOne()
                 .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
@@ -208,9 +223,21 @@ public sealed class AppDbContext(
                 .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
                 .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<OrderItemComponent>("_componentSnapshots")
+                .WithOne().HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<OrderPlanCreditAllocation>("_planCreditAllocations")
+                .WithOne().HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<OrderConfirmationAudit>("_confirmationAudits")
+                .WithOne().HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             configuration.Navigation("_items").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_frozenAllocations").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.Navigation("_charges").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_componentSnapshots").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_planCreditAllocations").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_confirmationAudits").UsePropertyAccessMode(PropertyAccessMode.Field);
             configuration.HasIndex(item => new { item.OrganizationId, item.ConfirmationIdempotencyKey })
                 .IsUnique();
             configuration.HasIndex(item => new { item.OrganizationId, item.CreationIdempotencyKey })
@@ -238,6 +265,12 @@ public sealed class AppDbContext(
             configuration.HasOne<FrozenConfiguration>()
                 .WithMany()
                 .HasForeignKey(item => new { item.OrganizationId, item.FrozenConfigurationId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+            configuration.HasOne<ProducibleItem>()
+                .WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.ProducibleItemId })
                 .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
                 .OnDelete(DeleteBehavior.Restrict)
                 .IsRequired(false);
@@ -296,6 +329,146 @@ public sealed class AppDbContext(
                 item.OrganizationId,
                 item.LastConfigurationIdempotencyKey,
             }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        ConfigureConfirmationCommerce(modelBuilder);
+    }
+
+    private void ConfigureConfirmationCommerce(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ProducibleComposition>(configuration =>
+        {
+            configuration.ToTable("producible_compositions");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Ignore(item => item.Components);
+            configuration.HasOne<ProducibleItem>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.ProducibleItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<ProducibleComponent>("_components").WithOne()
+                .HasForeignKey(item => new { item.OrganizationId, item.CompositionId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.Navigation("_components").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.HasIndex(item => new { item.OrganizationId, item.ProducibleItemId, item.Version }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<ProducibleComponent>(configuration =>
+        {
+            configuration.ToTable("producible_components");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.MeasurementUnit).HasMaxLength(30).IsRequired();
+            configuration.Property(item => item.DietaryMarkers).HasMaxLength(500).IsRequired();
+            configuration.Property(item => item.Quantity).HasPrecision(12, 3);
+            configuration.Ignore(item => item.Markers);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<CustomerDietaryRestriction>(configuration =>
+        {
+            configuration.ToTable("customer_dietary_restrictions");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Marker).HasMaxLength(80).IsRequired();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.CustomerId, item.Marker }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<PlanAcquisition>(configuration =>
+        {
+            configuration.ToTable("plan_acquisitions");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.PlanName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.BenefitAmountPerCredit).HasPrecision(12, 2);
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<CatalogOffer>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.EligibleOfferId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.Ignore(item => item.Movements);
+            configuration.Ignore(item => item.Balance);
+            configuration.HasMany<PlanCreditMovement>("_movements").WithOne()
+                .HasForeignKey(item => new { item.OrganizationId, item.AcquisitionId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.Navigation("_movements").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<PlanCreditMovement>(configuration =>
+        {
+            configuration.ToTable("plan_credit_movements");
+            configuration.HasKey(item => item.Id);
+            configuration.Ignore(item => item.SignedQuantity);
+            configuration.HasIndex(item => new { item.OrganizationId, item.OrderId, item.OrderItemId });
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<FinancialCreditMovement>(configuration =>
+        {
+            configuration.ToTable("financial_credit_movements");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Amount).HasPrecision(12, 2);
+            configuration.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<Order>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict).IsRequired(false);
+            configuration.Ignore(item => item.SignedAmount);
+            configuration.HasIndex(item => new { item.OrganizationId, item.CustomerId, item.OccurredAt });
+            configuration.HasIndex(item => new { item.OrganizationId, item.OrderId })
+                .IsUnique().HasFilter("\"OrderId\" IS NOT NULL AND \"Type\" = 1");
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrderItemComponent>(configuration =>
+        {
+            configuration.ToTable("order_item_components");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.MeasurementUnit).HasMaxLength(30).IsRequired();
+            configuration.Property(item => item.DietaryMarkers).HasMaxLength(500).IsRequired();
+            configuration.Property(item => item.QuantityPerUnit).HasPrecision(12, 3);
+            configuration.Property(item => item.TotalQuantity).HasPrecision(12, 3);
+            configuration.HasOne<OrderItem>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrderPlanCreditAllocation>(configuration =>
+        {
+            configuration.ToTable("order_plan_credit_allocations");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.PlanName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.CoveredAmount).HasPrecision(12, 2);
+            configuration.HasOne<OrderItem>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.OrderItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlanAcquisition>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.AcquisitionId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrderConfirmationAudit>(configuration =>
+        {
+            configuration.ToTable("order_confirmation_audits");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.DiscountReason).HasMaxLength(500);
+            configuration.Property(item => item.Subtotal).HasPrecision(12, 2);
+            configuration.Property(item => item.PlanCreditCoveredAmount).HasPrecision(12, 2);
+            configuration.Property(item => item.DiscountAmount).HasPrecision(12, 2);
+            configuration.Property(item => item.DeliveryFee).HasPrecision(12, 2);
+            configuration.Property(item => item.FinancialCreditApplied).HasPrecision(12, 2);
+            configuration.Property(item => item.AmountDue).HasPrecision(12, 2);
+            configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
     }

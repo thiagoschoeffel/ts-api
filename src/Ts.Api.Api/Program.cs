@@ -28,6 +28,10 @@ builder.Services.AddScoped<EditOrderHandler>();
 builder.Services.AddScoped<GetOrderHandler>();
 builder.Services.AddScoped<ConfigureDailyCapacityHandler>();
 builder.Services.AddScoped<GetDailyCapacityHandler>();
+builder.Services.AddScoped<PublishCompositionHandler>();
+builder.Services.AddScoped<AddCustomerRestrictionHandler>();
+builder.Services.AddScoped<CreatePlanAcquisitionHandler>();
+builder.Services.AddScoped<GrantFinancialCreditHandler>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

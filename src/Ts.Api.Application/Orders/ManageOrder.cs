@@ -181,11 +181,22 @@ internal static class OrderItemResolver
                     throw new DomainException("O preço unitário é obrigatório para uma oferta da produção diária.");
                 }
 
+                if (input.ProducibleItemId is not Guid producibleItemId)
+                {
+                    throw new DomainException("O item produzível é obrigatório para uma oferta da produção diária.");
+                }
+
+                var dailyProducibleItem = await store.FindActiveProducibleItemAsync(
+                    producibleItemId, cancellationToken)
+                    ?? throw new DomainException("O item produzível informado não existe ou está inativo.");
+
                 definitions.Add(new OrderItemDefinition(
                     offer.Id,
                     offer.FulfillmentMode,
                     input.Quantity,
                     dailyPrice,
+                    ProducibleItemId: dailyProducibleItem.Id,
+                    ProducibleItemName: dailyProducibleItem.Name,
                     OfferName: offer.Name));
                 continue;
             }
@@ -193,6 +204,11 @@ internal static class OrderItemResolver
             if (input.UnitPrice is not null)
             {
                 throw new DomainException("O preço do congelado é definido pela configuração autoritativa.");
+            }
+
+            if (input.ProducibleItemId is not null)
+            {
+                throw new DomainException("O item produzível do congelado é definido pela configuração autoritativa.");
             }
 
             if (input.FrozenConfigurationId is not Guid frozenConfigurationId)
@@ -219,6 +235,7 @@ internal static class OrderItemResolver
                 input.Quantity,
                 configuration.UnitPrice,
                 configuration.Id,
+                configuration.ProducibleItemId,
                 offer.Name,
                 producibleItem.Name,
                 configuration.Presentation));
@@ -248,6 +265,9 @@ internal static class OrderResultMapper
             && pair.First.Quantity == pair.Second.Quantity
             && pair.First.FrozenConfigurationId == pair.Second.FrozenConfigurationId
             && (pair.First.FulfillmentMode == OfferFulfillmentMode.FrozenStock
+                ? pair.Second.ProducibleItemId is null
+                : pair.First.ProducibleItemId == pair.Second.ProducibleItemId)
+            && (pair.First.FulfillmentMode == OfferFulfillmentMode.FrozenStock
                 ? pair.Second.UnitPrice is null
                 : pair.First.UnitPrice == pair.Second.UnitPrice));
     }
@@ -269,6 +289,7 @@ internal static class OrderResultMapper
             item.UnitPrice,
             item.Total,
             item.FrozenConfigurationId,
+            item.ProducibleItemId,
             item.ProducibleItemName,
             item.FrozenPresentation)).ToArray());
 }

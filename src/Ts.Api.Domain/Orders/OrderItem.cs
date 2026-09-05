@@ -15,6 +15,7 @@ public sealed class OrderItem : ITenantOwned
         int quantity,
         decimal unitPrice,
         Guid? frozenConfigurationId,
+        Guid? producibleItemId = null,
         string offerName = "",
         string? producibleItemName = null,
         string? frozenPresentation = null)
@@ -57,6 +58,7 @@ public sealed class OrderItem : ITenantOwned
         Quantity = quantity;
         UnitPrice = unitPrice;
         FrozenConfigurationId = frozenConfigurationId;
+        ProducibleItemId = producibleItemId;
         OfferName = offerName.Trim();
         ProducibleItemName = producibleItemName?.Trim();
         FrozenPresentation = frozenPresentation?.Trim();
@@ -70,6 +72,7 @@ public sealed class OrderItem : ITenantOwned
     public int Quantity { get; private set; }
     public decimal UnitPrice { get; private set; }
     public Guid? FrozenConfigurationId { get; private set; }
+    public Guid? ProducibleItemId { get; private set; }
     public string OfferName { get; private set; } = string.Empty;
     public string? ProducibleItemName { get; private set; }
     public string? FrozenPresentation { get; private set; }

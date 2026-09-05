@@ -40,7 +40,7 @@ public sealed class ManageOrderHandlerTests
             Guid.NewGuid(),
             new DateOnly(2026, 9, 5),
             [
-                new OrderItemInput(dailyOffer.Id, 2, 18m),
+                new OrderItemInput(dailyOffer.Id, 2, 18m, ProducibleItemId: producible.Id),
                 new OrderItemInput(frozenOffer.Id, 3, FrozenConfigurationId: configuration.Id),
             ],
             "create-order-001");
@@ -116,13 +116,14 @@ public sealed class ManageOrderHandlerTests
             new DateOnly(2026, 9, 5),
             [new OrderItemDefinition(offer.Id, offer.FulfillmentMode, 1, 10m, OfferName: offer.Name)],
             "create-editable");
-        var store = new OrderManagementStoreFake([offer], [], [], [order]);
+        var producible = ProducibleItem.Create(OrganizationId, "Prato do dia");
+        var store = new OrderManagementStoreFake([offer], [], [producible], [order]);
         var handler = new EditOrderHandler(store);
         var command = new EditOrderCommand(
             order.Id,
             order.CustomerId,
             order.OperationalDate,
-            [new OrderItemInput(offer.Id, 2, 10m)],
+            [new OrderItemInput(offer.Id, 2, 10m, ProducibleItemId: producible.Id)],
             0,
             "edit-001");
 
@@ -135,14 +136,14 @@ public sealed class ManageOrderHandlerTests
         Assert.Equal(1, store.SaveCount);
 
         var reusedKeyException = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(
-            command with { Items = [new OrderItemInput(offer.Id, 3, 10m)] },
+            command with { Items = [new OrderItemInput(offer.Id, 3, 10m, ProducibleItemId: producible.Id)] },
             CancellationToken.None));
         Assert.Equal(
             "A chave de idempotência já foi usada para outro pedido ou conteúdo.",
             reusedKeyException.Message);
 
         var exception = await Assert.ThrowsAsync<ConflictException>(() => handler.HandleAsync(
-            command with { IdempotencyKey = "edit-stale", Items = [new OrderItemInput(offer.Id, 3, 10m)] },
+            command with { IdempotencyKey = "edit-stale", Items = [new OrderItemInput(offer.Id, 3, 10m, ProducibleItemId: producible.Id)] },
             CancellationToken.None));
         Assert.Equal("O pedido foi alterado. Recarregue os dados antes de editar.", exception.Message);
     }

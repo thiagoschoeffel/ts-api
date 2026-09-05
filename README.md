@@ -22,6 +22,11 @@ Esta primeira fatia estabelece:
 - criação, edição e consulta de Pedidos abertos com itens diários e congelados validados contra fontes autoritativas;
 - snapshots de oferta, item produzível, apresentação e preço preservados nos itens do Pedido;
 - configuração e consulta da capacidade diária, com saldo derivado, versão otimista e unicidade por Organização/data;
+- composição produzível versionada e snapshot dos componentes efetivos na confirmação;
+- restrições alimentares estruturadas validadas contra os marcadores da composição;
+- aquisições de plano com ledger e consumo compatível por FIFO, rastreado por item e aquisição;
+- ledger de crédito financeiro, desconto auditado, taxa preservada e cobrança somente do saldo restante;
+- auditoria imutável das condições e efeitos comerciais da confirmação;
 - health checks de processo e banco;
 - testes unitários das invariantes já implementadas;
 - execução local e imagem de deploy com Docker.
@@ -31,6 +36,10 @@ Endpoints de escrita disponíveis nesta primeira fatia:
 ```text
 POST /api/catalog/offers
 POST /api/production/items
+POST /api/production/items/{producibleItemId}/compositions
+POST /api/customers/{customerId}/dietary-restrictions
+POST /api/plans/acquisitions
+POST /api/financial-credits
 POST /api/frozen-stock/configurations
 POST /api/frozen-stock/production-entries
 POST /api/orders
@@ -41,11 +50,13 @@ GET  /api/daily-capacities/{operationalDate}
 POST /api/orders/{orderId}/confirmation
 ```
 
-A entrada de produção, a criação/edição do Pedido, a configuração de capacidade e a confirmação exigem `Idempotency-Key`. Edição, configuração e confirmação também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição com a mesma chave devolve o efeito já persistido, sem duplicá-lo; reutilizar a chave para outro recurso ou conteúdo gera conflito.
+A entrada de produção, a criação/edição do Pedido, a configuração de capacidade e a confirmação exigem `Idempotency-Key`. Edição, configuração e confirmação também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição da confirmação só devolve o efeito persistido quando todas as condições comerciais coincidem; reutilizar a chave para outro recurso ou conteúdo gera conflito.
 
-No Pedido, a modalidade vem da Oferta ativa. Itens diários recebem o preço informado para o rascunho; itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa, que deve pertencer à Oferta e a um Item Produzível ativo. Os snapshots retornados permanecem no Pedido mesmo que os cadastros mudem depois. O `CustomerId` continua sendo uma identidade externa obrigatória até o domínio autoritativo de Clientes do E12.
+No Pedido, a modalidade vem da Oferta ativa. Itens diários exigem o Item Produzível escolhido e recebem o preço informado para o rascunho; itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa. Na confirmação, a versão mais recente da composição é consolidada no Pedido e validada contra as restrições do cliente. Esses snapshots permanecem estáveis mesmo que a composição mude depois. O `CustomerId` continua sendo uma identidade externa obrigatória até o domínio autoritativo de Clientes do E12.
 
-O tenant nunca é recebido no payload: ele é obtido da claim autenticada `organization_id`. A configuração de um provedor de identidade e as políticas de autorização ainda serão adicionadas antes de qualquer uso operacional real. Créditos de plano, crédito financeiro, composição e restrições serão incorporados à transação de confirmação no próximo épico.
+O corpo da confirmação pode solicitar créditos por `OrderItemId`, desconto com motivo, taxa de entrega e crédito financeiro. Créditos de plano são consumidos das aquisições compatíveis mais antigas; cada crédito cobre no máximo o benefício contratado e eventuais upgrades continuam no saldo financeiro. Desconto não é pagamento, crédito financeiro não é crédito de plano, e a cobrança registra somente o saldo final positivo.
+
+O tenant nunca é recebido no payload: ele é obtido da claim autenticada `organization_id`. A configuração de um provedor de identidade e as políticas de autorização ainda serão adicionadas antes de qualquer uso operacional real. Os endpoints auxiliares deste épico expõem apenas a fundação necessária para exercitar a confirmação; a gestão completa de Catálogo, Clientes, Planos e Financeiro permanece nos épicos E11 e E12.
 
 Em `Development`, a organização Sabor Santè é selecionada por uma configuração do servidor para manter os fluxos locais utilizáveis enquanto o provedor de identidade não foi escolhido. Esse fallback não funciona fora do ambiente de desenvolvimento; em produção, chamadas a `/api` sem uma identidade autenticada contendo `organization_id` recebem `401`.
 
@@ -84,6 +95,8 @@ dotnet build --configuration Release
 - Dados de negócio implementam o contrato tenant-owned. Filtros globais do EF Core isolam leituras, `SaveChanges` rejeita escritas de outro tenant e chaves estrangeiras compostas impedem referências cruzadas entre organizações.
 - Unicidades de negócio e idempotência são locais à organização. A migration multi-tenant associa os dados existentes ao tenant inicial Sabor Santè.
 - A confirmação de Pedido usa transação `Serializable`, versão otimista e chave idempotente por Organização; itens congelados são alocados por validade, fabricação e ID estável.
+- Composição, preço e condições comerciais usados na confirmação são snapshots históricos; restrições impedem a operação antes do commit.
+- Crédito de plano tem ledger próprio e é consumido por FIFO dentro da oferta elegível; crédito financeiro possui ledger monetário separado.
 - Pedidos abertos não reservam capacidade nem estoque. A capacidade expõe `TotalUnits`, `ReservedUnits` e `AvailableUnits`; sua versão avança tanto em reconfiguração quanto em reserva por confirmação.
 - Impressão será um adapter de infraestrutura separado e nunca alterará lote, estoque ou Pedido.
 
@@ -95,5 +108,6 @@ dotnet build --configuration Release
 4. implementar habilitação de congelado e entrada atômica de lote + `ProductionEntry`, com idempotência — concluído;
 5. implementar a primeira fatia transacional de confirmação do Pedido, com capacidade, cobrança e alocação FEFO — concluído;
 6. adicionar criação autoritativa do Pedido e configuração da capacidade diária — concluído;
-7. incorporar créditos de plano, crédito financeiro, composição e restrições à transação de confirmação;
-8. integrar o frontend consolidado por meio de adapters, sem transportar interfaces de mock para a API.
+7. incorporar créditos de plano, crédito financeiro, composição e restrições à transação de confirmação — concluído;
+8. implementar cancelamento, reagendamento e reversões dos efeitos autoritativos;
+9. integrar o frontend consolidado por meio de adapters, sem transportar interfaces de mock para a API.

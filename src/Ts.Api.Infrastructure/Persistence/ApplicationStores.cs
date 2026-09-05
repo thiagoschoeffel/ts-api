@@ -7,8 +7,11 @@ using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
+using Ts.Api.Domain.Customers;
+using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
+using Ts.Api.Domain.Plans;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
@@ -173,11 +176,49 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
             .ThenBy(item => item.Id)
             .ToListAsync(cancellationToken);
 
+    public Task<ProducibleComposition?> FindPublishedCompositionAsync(
+        Guid producibleItemId,
+        CancellationToken cancellationToken) => database.ProducibleCompositions
+        .Include("_components")
+        .Where(item => item.ProducibleItemId == producibleItemId)
+        .OrderByDescending(item => item.Version)
+        .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<CustomerDietaryRestriction>> FindCustomerRestrictionsAsync(
+        Guid customerId,
+        CancellationToken cancellationToken) => await database.CustomerDietaryRestrictions
+        .Where(item => item.CustomerId == customerId)
+        .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<PlanAcquisition>> FindEligiblePlanAcquisitionsAsync(
+        Guid customerId,
+        Guid offerId,
+        CancellationToken cancellationToken) => await database.PlanAcquisitions
+        .Include("_movements")
+        .Where(item => item.CustomerId == customerId && item.EligibleOfferId == offerId)
+        .OrderBy(item => item.AcquiredOn)
+        .ThenBy(item => item.Id)
+        .ToListAsync(cancellationToken);
+
+    public async Task<decimal> GetFinancialCreditBalanceAsync(
+        Guid customerId,
+        CancellationToken cancellationToken) => (await database.FinancialCreditMovements
+            .Where(item => item.CustomerId == customerId)
+            .ToListAsync(cancellationToken))
+        .Sum(item => item.SignedAmount);
+
+    public void AddFinancialCreditMovement(FinancialCreditMovement movement) =>
+        database.FinancialCreditMovements.Add(movement);
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         MarkNewEffectsAsAdded<FrozenStockAllocation>();
         MarkNewEffectsAsAdded<FrozenStockMovement>();
         MarkNewEffectsAsAdded<OrderCharge>();
+        MarkNewEffectsAsAdded<OrderItemComponent>();
+        MarkNewEffectsAsAdded<OrderPlanCreditAllocation>();
+        MarkNewEffectsAsAdded<OrderConfirmationAudit>();
+        MarkNewEffectsAsAdded<PlanCreditMovement>();
         return database.SaveChangesAsync(cancellationToken);
     }
 
@@ -186,6 +227,9 @@ public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfir
             .Include("_items")
             .Include("_frozenAllocations")
             .Include("_charges")
+            .Include("_componentSnapshots")
+            .Include("_planCreditAllocations")
+            .Include("_confirmationAudits")
             .AsSplitQuery();
 
     private void MarkNewEffectsAsAdded<TEntity>() where TEntity : class
@@ -322,4 +366,28 @@ public sealed class OrderManagementStore(AppDbContext database) :
             IsRetryableConcurrencyConflict(exception.InnerException),
         _ => false,
     };
+}
+
+public sealed class OrderConfirmationSetupStore(AppDbContext database) : IOrderConfirmationSetupStore
+{
+    public Task<ProducibleItem?> FindProducibleItemAsync(Guid id, CancellationToken cancellationToken) =>
+        database.ProducibleItems.SingleOrDefaultAsync(item => item.Id == id && item.IsActive, cancellationToken);
+
+    public Task<CatalogOffer?> FindOfferAsync(Guid id, CancellationToken cancellationToken) =>
+        database.CatalogOffers.SingleOrDefaultAsync(item => item.Id == id && item.IsActive, cancellationToken);
+
+    public async Task<int> GetNextCompositionVersionAsync(Guid producibleItemId, CancellationToken cancellationToken) =>
+        (await database.ProducibleCompositions
+            .Where(item => item.ProducibleItemId == producibleItemId)
+            .MaxAsync(item => (int?)item.Version, cancellationToken) ?? 0) + 1;
+
+    public Task<bool> RestrictionExistsAsync(Guid customerId, string marker, CancellationToken cancellationToken) =>
+        database.CustomerDietaryRestrictions.AnyAsync(
+            item => item.CustomerId == customerId && item.Marker == marker, cancellationToken);
+
+    public void Add(ProducibleComposition composition) => database.ProducibleCompositions.Add(composition);
+    public void Add(CustomerDietaryRestriction restriction) => database.CustomerDietaryRestrictions.Add(restriction);
+    public void Add(PlanAcquisition acquisition) => database.PlanAcquisitions.Add(acquisition);
+    public void Add(FinancialCreditMovement movement) => database.FinancialCreditMovements.Add(movement);
+    public Task SaveChangesAsync(CancellationToken cancellationToken) => database.SaveChangesAsync(cancellationToken);
 }

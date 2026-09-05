@@ -8,6 +8,9 @@ public sealed class Order : ITenantOwned
     private readonly List<OrderItem> _items = [];
     private readonly List<FrozenStockAllocation> _frozenAllocations = [];
     private readonly List<OrderCharge> _charges = [];
+    private readonly List<OrderItemComponent> _componentSnapshots = [];
+    private readonly List<OrderPlanCreditAllocation> _planCreditAllocations = [];
+    private readonly List<OrderConfirmationAudit> _confirmationAudits = [];
 
     private Order() { }
 
@@ -39,6 +42,9 @@ public sealed class Order : ITenantOwned
     public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
     public IReadOnlyCollection<FrozenStockAllocation> FrozenAllocations => _frozenAllocations.AsReadOnly();
     public IReadOnlyCollection<OrderCharge> Charges => _charges.AsReadOnly();
+    public IReadOnlyCollection<OrderItemComponent> ComponentSnapshots => _componentSnapshots.AsReadOnly();
+    public IReadOnlyCollection<OrderPlanCreditAllocation> PlanCreditAllocations => _planCreditAllocations.AsReadOnly();
+    public IReadOnlyCollection<OrderConfirmationAudit> ConfirmationAudits => _confirmationAudits.AsReadOnly();
     public int DailyCapacityUnits => _items
         .Where(item => item.FulfillmentMode == OfferFulfillmentMode.DailyProduction)
         .Sum(item => item.Quantity);
@@ -135,7 +141,40 @@ public sealed class Order : ITenantOwned
         return allocation;
     }
 
-    public void Confirm(Guid actorId, DateTimeOffset confirmedAt, string idempotencyKey)
+    public void SnapshotComponent(
+        OrderItem item, Guid compositionId, int compositionVersion, string name,
+        decimal quantityPerUnit, string measurementUnit, string dietaryMarkers)
+    {
+        if (Status != OrderStatus.Open || !_items.Contains(item))
+        {
+            throw new DomainException("A composição só pode ser consolidada em item do pedido aberto.");
+        }
+
+        _componentSnapshots.Add(new OrderItemComponent(
+            OrganizationId, Id, item.Id, compositionId, compositionVersion, name,
+            quantityPerUnit, quantityPerUnit * item.Quantity, measurementUnit, dietaryMarkers));
+    }
+
+    public void AllocatePlanCredit(
+        OrderItem item, Guid acquisitionId, string planName, int quantity, decimal coveredAmount)
+    {
+        if (Status != OrderStatus.Open || !_items.Contains(item) || quantity <= 0 || coveredAmount <= 0)
+        {
+            throw new DomainException("A alocação de crédito de plano é inválida.");
+        }
+
+        _planCreditAllocations.Add(new OrderPlanCreditAllocation(
+            OrganizationId, Id, item.Id, acquisitionId, planName, quantity, coveredAmount));
+    }
+
+    public void Confirm(
+        Guid actorId,
+        DateTimeOffset confirmedAt,
+        string idempotencyKey,
+        decimal discountAmount = 0,
+        string? discountReason = null,
+        decimal deliveryFee = 0,
+        decimal financialCreditApplied = 0)
     {
         if (Status != OrderStatus.Open)
         {
@@ -164,10 +203,32 @@ public sealed class Order : ITenantOwned
             }
         }
 
-        if (TotalAmount > 0)
+        var normalizedReason = discountReason?.Trim();
+        var planCovered = _planCreditAllocations.Sum(allocation => allocation.CoveredAmount);
+        if (discountAmount < 0 || deliveryFee < 0 || financialCreditApplied < 0
+            || discountAmount > 0 && string.IsNullOrWhiteSpace(normalizedReason)
+            || normalizedReason?.Length > 500
+            || discountAmount > TotalAmount - planCovered)
         {
-            _charges.Add(new OrderCharge(OrganizationId, Id, TotalAmount, OperationalDate, confirmedAt));
+            throw new DomainException("Desconto, motivo, taxa ou crédito financeiro são inválidos.");
         }
+
+        var beforeFinancialCredit = TotalAmount - planCovered - discountAmount + deliveryFee;
+        if (financialCreditApplied > beforeFinancialCredit)
+        {
+            throw new DomainException("O crédito financeiro não pode exceder o saldo do pedido.");
+        }
+
+        var amountDue = beforeFinancialCredit - financialCreditApplied;
+        if (amountDue > 0)
+        {
+            _charges.Add(new OrderCharge(OrganizationId, Id, amountDue, OperationalDate, confirmedAt));
+        }
+
+        _confirmationAudits.Add(new OrderConfirmationAudit(
+            OrganizationId, Id, actorId, confirmedAt, normalizedKey, TotalAmount,
+            planCovered, discountAmount, normalizedReason, deliveryFee,
+            financialCreditApplied, amountDue));
 
         Status = OrderStatus.Confirmed;
         ConfirmedBy = actorId;
@@ -189,6 +250,7 @@ public sealed class Order : ITenantOwned
                 item.Quantity,
                 item.UnitPrice,
                 item.FrozenConfigurationId,
+                item.ProducibleItemId,
                 item.OfferName,
                 item.ProducibleItemName,
                 item.FrozenPresentation));
@@ -213,6 +275,7 @@ public sealed record OrderItemDefinition(
     int Quantity,
     decimal UnitPrice,
     Guid? FrozenConfigurationId = null,
+    Guid? ProducibleItemId = null,
     string OfferName = "",
     string? ProducibleItemName = null,
     string? FrozenPresentation = null);

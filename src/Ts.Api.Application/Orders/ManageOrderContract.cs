@@ -7,7 +7,8 @@ public sealed record OrderItemInput(
     Guid OfferId,
     int Quantity,
     decimal? UnitPrice = null,
-    Guid? FrozenConfigurationId = null);
+    Guid? FrozenConfigurationId = null,
+    Guid? ProducibleItemId = null);
 
 public sealed record CreateOrderCommand(
     Guid CustomerId,
@@ -42,5 +43,6 @@ public sealed record OrderItemResult(
     decimal UnitPrice,
     decimal Total,
     Guid? FrozenConfigurationId,
+    Guid? ProducibleItemId,
     string? ProducibleItemName,
     string? FrozenPresentation);

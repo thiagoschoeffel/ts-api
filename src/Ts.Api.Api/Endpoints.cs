@@ -4,6 +4,7 @@ using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
+using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Api;
 
@@ -33,6 +34,14 @@ public static class Endpoints
             .WithName("ConfigureDailyCapacity");
         api.MapGet("/daily-capacities/{operationalDate}", GetDailyCapacityAsync)
             .WithName("GetDailyCapacity");
+        api.MapPost("/production/items/{producibleItemId:guid}/compositions", PublishCompositionAsync)
+            .WithName("PublishProducibleComposition");
+        api.MapPost("/customers/{customerId:guid}/dietary-restrictions", AddCustomerRestrictionAsync)
+            .WithName("AddCustomerDietaryRestriction");
+        api.MapPost("/plans/acquisitions", CreatePlanAcquisitionAsync)
+            .WithName("CreatePlanAcquisition");
+        api.MapPost("/financial-credits", GrantFinancialCreditAsync)
+            .WithName("GrantFinancialCredit");
 
         return endpoints;
     }
@@ -123,7 +132,12 @@ public static class Endpoints
                 orderId,
                 request.ActorId,
                 idempotencyKey,
-                request.ExpectedVersion),
+                request.ExpectedVersion,
+                request.PlanCredits?.Select(item => new PlanCreditRequest(item.OrderItemId, item.Quantity)).ToArray(),
+                request.DiscountAmount,
+                request.DiscountReason,
+                request.DeliveryFee,
+                request.FinancialCreditAmount),
             cancellationToken);
         return TypedResults.Ok(result);
     }
@@ -210,11 +224,57 @@ public static class Endpoints
         CancellationToken cancellationToken) =>
         TypedResults.Ok(await handler.HandleAsync(operationalDate, cancellationToken));
 
+    private static async Task<IResult> PublishCompositionAsync(
+        Guid producibleItemId,
+        PublishCompositionRequest request,
+        PublishCompositionHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new PublishCompositionCommand(
+            producibleItemId,
+            request.Components.Select(item => new ProducibleComponentDefinition(
+                item.Name, item.Quantity, item.MeasurementUnit, item.DietaryMarkers ?? [])).ToArray()), cancellationToken);
+        return TypedResults.Created($"/api/production/items/{producibleItemId}/compositions/{result.Id}", result);
+    }
+
+    private static async Task<IResult> AddCustomerRestrictionAsync(
+        Guid customerId,
+        AddCustomerRestrictionRequest request,
+        AddCustomerRestrictionHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(
+            new AddCustomerRestrictionCommand(customerId, request.Marker), cancellationToken);
+        return TypedResults.Created($"/api/customers/{customerId}/dietary-restrictions/{result.Id}", result);
+    }
+
+    private static async Task<IResult> CreatePlanAcquisitionAsync(
+        CreatePlanAcquisitionRequest request,
+        CreatePlanAcquisitionHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new CreatePlanAcquisitionCommand(
+            request.CustomerId, request.EligibleOfferId, request.PlanName, request.Credits,
+            request.BenefitAmountPerCredit, request.AcquiredOn), cancellationToken);
+        return TypedResults.Created($"/api/plans/acquisitions/{result.Id}", result);
+    }
+
+    private static async Task<IResult> GrantFinancialCreditAsync(
+        GrantFinancialCreditRequest request,
+        GrantFinancialCreditHandler handler,
+        CancellationToken cancellationToken)
+    {
+        var result = await handler.HandleAsync(new GrantFinancialCreditCommand(
+            request.CustomerId, request.Amount, request.Reason, request.ActorId), cancellationToken);
+        return TypedResults.Created($"/api/financial-credits/{result.Id}", result);
+    }
+
     private static OrderItemInput MapOrderItem(OrderItemRequest item) => new(
         item.OfferId,
         item.Quantity,
         item.UnitPrice,
-        item.FrozenConfigurationId);
+        item.FrozenConfigurationId,
+        item.ProducibleItemId);
 
     private static (string? Value, IResult? Error) ReadIdempotencyKey(HttpContext httpContext)
     {
@@ -246,7 +306,16 @@ public sealed record RegisterFrozenProductionRequest(
     int ProducedQuantity,
     Guid ActorId);
 
-public sealed record ConfirmOrderRequest(Guid ActorId, long ExpectedVersion);
+public sealed record ConfirmOrderRequest(
+    Guid ActorId,
+    long ExpectedVersion,
+    IReadOnlyCollection<PlanCreditRequestBody>? PlanCredits = null,
+    decimal DiscountAmount = 0,
+    string? DiscountReason = null,
+    decimal DeliveryFee = 0,
+    decimal FinancialCreditAmount = 0);
+
+public sealed record PlanCreditRequestBody(Guid OrderItemId, int Quantity);
 
 public sealed record CreateOrderRequest(
     Guid CustomerId,
@@ -263,6 +332,16 @@ public sealed record OrderItemRequest(
     Guid OfferId,
     int Quantity,
     decimal? UnitPrice = null,
-    Guid? FrozenConfigurationId = null);
+    Guid? FrozenConfigurationId = null,
+    Guid? ProducibleItemId = null);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
+
+public sealed record PublishCompositionRequest(IReadOnlyCollection<ProducibleComponentRequest> Components);
+public sealed record ProducibleComponentRequest(
+    string Name, decimal Quantity, string MeasurementUnit, IReadOnlyCollection<string>? DietaryMarkers = null);
+public sealed record AddCustomerRestrictionRequest(string Marker);
+public sealed record CreatePlanAcquisitionRequest(
+    Guid CustomerId, Guid EligibleOfferId, string PlanName, int Credits,
+    decimal BenefitAmountPerCredit, DateOnly AcquiredOn);
+public sealed record GrantFinancialCreditRequest(Guid CustomerId, decimal Amount, string Reason, Guid ActorId);

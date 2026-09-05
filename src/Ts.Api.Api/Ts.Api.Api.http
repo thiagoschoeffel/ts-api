@@ -27,6 +27,55 @@ Content-Type: application/json
   "name": "Estrogonofe de frango"
 }
 
+### Publique uma composição; versões posteriores não reescrevem snapshots já confirmados
+
+POST {{Ts_Api_HostAddress}}/api/production/items/00000000-0000-0000-0000-000000000000/compositions
+Content-Type: application/json
+
+{
+  "components": [
+    {
+      "name": "Frango grelhado",
+      "quantity": 150,
+      "measurementUnit": "g",
+      "dietaryMarkers": []
+    }
+  ]
+}
+
+### Contexto comercial mínimo; use o mesmo CustomerId do Pedido
+
+POST {{Ts_Api_HostAddress}}/api/plans/acquisitions
+Content-Type: application/json
+
+{
+  "customerId": "00000000-0000-0000-0000-000000000002",
+  "eligibleOfferId": "00000000-0000-0000-0000-000000000000",
+  "planName": "Plano Prato do Dia",
+  "credits": 10,
+  "benefitAmountPerCredit": 18.00,
+  "acquiredOn": "2026-09-01"
+}
+
+### Restrição sem conflito com a composição acima
+
+POST {{Ts_Api_HostAddress}}/api/customers/00000000-0000-0000-0000-000000000002/dietary-restrictions
+Content-Type: application/json
+
+{
+  "marker": "amendoim"
+}
+
+POST {{Ts_Api_HostAddress}}/api/financial-credits
+Content-Type: application/json
+
+{
+  "customerId": "00000000-0000-0000-0000-000000000002",
+  "amount": 25.00,
+  "reason": "Pagamento excedente",
+  "actorId": "00000000-0000-0000-0000-000000000001"
+}
+
 ### Oferta diária para compor um Pedido misto
 
 POST {{Ts_Api_HostAddress}}/api/catalog/offers
@@ -93,7 +142,8 @@ Idempotency-Key: order-create-2026-09-05-01
     {
       "offerId": "00000000-0000-0000-0000-000000000000",
       "quantity": 2,
-      "unitPrice": 18.00
+      "unitPrice": 18.00,
+      "producibleItemId": "00000000-0000-0000-0000-000000000000"
     },
     {
       "offerId": "00000000-0000-0000-0000-000000000000",
@@ -122,7 +172,8 @@ Idempotency-Key: order-edit-2026-09-05-01
     {
       "offerId": "00000000-0000-0000-0000-000000000000",
       "quantity": 2,
-      "unitPrice": 18.00
+      "unitPrice": 18.00,
+      "producibleItemId": "00000000-0000-0000-0000-000000000000"
     }
   ]
 }
@@ -135,5 +186,15 @@ Idempotency-Key: order-confirmation-2026-09-04-01
 
 {
   "actorId": "00000000-0000-0000-0000-000000000001",
-  "expectedVersion": 0
+  "expectedVersion": 0,
+  "planCredits": [
+    {
+      "orderItemId": "00000000-0000-0000-0000-000000000000",
+      "quantity": 1
+    }
+  ],
+  "discountAmount": 2.00,
+  "discountReason": "Cortesia comercial",
+  "deliveryFee": 7.00,
+  "financialCreditAmount": 5.00
 }
