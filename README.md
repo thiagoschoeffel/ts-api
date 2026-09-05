@@ -2,11 +2,13 @@
 
 API autoritativa da Sabor Santè, construída em .NET 10 e organizada como monólito modular.
 
-> **Estado atual:** o frontend demonstrativo foi consolidado como linha de base em 4 de setembro de 2026 e a implementação autoritativa da API foi retomada. Evoluções posteriores do frontend seguem sem bloquear o backend.
+> **Estado atual:** os épicos E02–E09 estão concluídos. A fundação autoritativa,
+> o ciclo transacional de Pedidos e as integrações de Congelados, Pedidos e
+> capacidade estão disponíveis; Produção e Embalagem são a próxima fatia.
 
 ## Estado atual
 
-Esta primeira fatia estabelece:
+As fatias implementadas estabelecem:
 
 - separação entre API, aplicação, domínio e infraestrutura;
 - PostgreSQL como persistência transacional;
@@ -43,7 +45,7 @@ Esta primeira fatia estabelece:
 - testes unitários das invariantes já implementadas;
 - execução local e imagem de deploy com Docker.
 
-Endpoints de escrita disponíveis nesta primeira fatia:
+Endpoints disponíveis atualmente:
 
 ```text
 POST /api/catalog/offers
