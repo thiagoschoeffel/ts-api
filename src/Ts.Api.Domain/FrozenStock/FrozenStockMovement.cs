@@ -91,4 +91,24 @@ public sealed class FrozenStockMovement : ITenantOwned
             occurredAt,
             null);
     }
+
+    internal static FrozenStockMovement CreateOrderReversal(
+        Guid organizationId,
+        Guid frozenLotId,
+        Guid orderId,
+        Guid orderItemId,
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string reason)
+    {
+        if (quantity <= 0 || string.IsNullOrWhiteSpace(reason))
+        {
+            throw new DomainException("Quantidade e motivo são obrigatórios no estorno de estoque.");
+        }
+
+        return new FrozenStockMovement(
+            Guid.NewGuid(), organizationId, frozenLotId, StockMovementType.OrderReversal,
+            quantity, $"Order:{orderId:N}:{orderItemId:N}", actorId, occurredAt, reason.Trim());
+    }
 }

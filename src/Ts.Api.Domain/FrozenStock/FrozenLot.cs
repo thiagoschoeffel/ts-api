@@ -137,4 +137,33 @@ public sealed class FrozenLot : ITenantOwned
             actorId,
             occurredAt));
     }
+
+    public void ReverseOrderExit(
+        Guid orderId,
+        Guid orderItemId,
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt,
+        string reason)
+    {
+        if (orderId == Guid.Empty || orderItemId == Guid.Empty || actorId == Guid.Empty || quantity <= 0)
+        {
+            throw new DomainException("Pedido, item, quantidade e responsável são obrigatórios no estorno de estoque.");
+        }
+
+        var origin = $"Order:{orderId:N}:{orderItemId:N}";
+        var exited = _movements
+            .Where(item => item.Type == StockMovementType.OrderExit && item.Origin == origin)
+            .Sum(item => item.Quantity);
+        var reversed = _movements
+            .Where(item => item.Type == StockMovementType.OrderReversal && item.Origin == origin)
+            .Sum(item => item.Quantity);
+        if (quantity > exited - reversed)
+        {
+            throw new DomainException("O estorno excede a saída deste item do pedido no lote.");
+        }
+
+        _movements.Add(FrozenStockMovement.CreateOrderReversal(
+            OrganizationId, Id, orderId, orderItemId, quantity, actorId, occurredAt, reason));
+    }
 }

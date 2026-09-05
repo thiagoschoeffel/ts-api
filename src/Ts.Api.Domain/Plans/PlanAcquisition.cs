@@ -86,6 +86,39 @@ public sealed class PlanAcquisition : ITenantOwned
         _movements.Add(movement);
         return movement;
     }
+
+    public PlanCreditMovement Reverse(
+        Guid orderId,
+        Guid orderItemId,
+        int quantity,
+        Guid actorId,
+        DateTimeOffset occurredAt)
+    {
+        if (orderId == Guid.Empty || orderItemId == Guid.Empty || actorId == Guid.Empty || quantity <= 0)
+        {
+            throw new DomainException("Pedido, item, quantidade e responsável são obrigatórios no estorno de crédito.");
+        }
+
+        var consumed = _movements
+            .Where(item => item.Type == PlanCreditMovementType.Consumed
+                && item.OrderId == orderId
+                && item.OrderItemId == orderItemId)
+            .Sum(item => item.Quantity);
+        var reversed = _movements
+            .Where(item => item.Type == PlanCreditMovementType.Reversed
+                && item.OrderId == orderId
+                && item.OrderItemId == orderItemId)
+            .Sum(item => item.Quantity);
+        if (quantity > consumed - reversed)
+        {
+            throw new DomainException("O estorno excede os créditos consumidos por este item do pedido.");
+        }
+
+        var movement = PlanCreditMovement.Reverse(
+            OrganizationId, Id, orderId, orderItemId, quantity, actorId, occurredAt);
+        _movements.Add(movement);
+        return movement;
+    }
 }
 
 public enum PlanCreditMovementType { Acquired, Consumed, Reversed, ManualAdjustment }
@@ -129,5 +162,11 @@ public sealed class PlanCreditMovement : ITenantOwned
         Guid organizationId, Guid acquisitionId, Guid orderId, Guid orderItemId,
         int quantity, Guid actorId, DateTimeOffset occurredAt) =>
         new(organizationId, acquisitionId, PlanCreditMovementType.Consumed,
+            quantity, orderId, orderItemId, actorId, occurredAt);
+
+    internal static PlanCreditMovement Reverse(
+        Guid organizationId, Guid acquisitionId, Guid orderId, Guid orderItemId,
+        int quantity, Guid actorId, DateTimeOffset occurredAt) =>
+        new(organizationId, acquisitionId, PlanCreditMovementType.Reversed,
             quantity, orderId, orderItemId, actorId, occurredAt);
 }

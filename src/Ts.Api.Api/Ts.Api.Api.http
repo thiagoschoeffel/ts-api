@@ -198,3 +198,62 @@ Idempotency-Key: order-confirmation-2026-09-04-01
   "deliveryFee": 7.00,
   "financialCreditAmount": 5.00
 }
+
+### Avance somente pela matriz permitida; use a versão devolvida pela operação anterior
+
+POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/status-transitions
+Content-Type: application/json
+Idempotency-Key: order-production-2026-09-05-01
+
+{
+  "newStatus": "InProduction",
+  "reason": "Produção do dia iniciada",
+  "actorId": "00000000-0000-0000-0000-000000000001",
+  "expectedVersion": 1
+}
+
+### Reagende um Pedido ainda Confirmed; a capacidade da nova data deve existir
+
+POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/rescheduling
+Content-Type: application/json
+Idempotency-Key: order-reschedule-2026-09-05-01
+
+{
+  "newOperationalDate": "2026-09-06",
+  "reason": "Solicitação do cliente",
+  "actorId": "00000000-0000-0000-0000-000000000001",
+  "expectedVersion": 1
+}
+
+### Cancele antes da separação e devolva congelados automaticamente ao mesmo lote
+
+POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/cancellation
+Content-Type: application/json
+Idempotency-Key: order-cancel-2026-09-05-01
+
+{
+  "reason": "Cliente desistiu",
+  "actorId": "00000000-0000-0000-0000-000000000001",
+  "expectedVersion": 1,
+  "commercialDisposition": "Reverse",
+  "frozenDisposition": "ReturnToStock"
+}
+
+### Após a separação, ReturnToStock exige conferência humana completa
+
+POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/cancellation
+Content-Type: application/json
+Idempotency-Key: order-cancel-inspected-2026-09-05-01
+
+{
+  "reason": "Cancelamento com retorno conferido",
+  "actorId": "00000000-0000-0000-0000-000000000001",
+  "expectedVersion": 2,
+  "commercialDisposition": "Reverse",
+  "frozenDisposition": "ReturnToStock",
+  "frozenReturnInspection": {
+    "packagingIntact": true,
+    "temperatureControlled": true,
+    "traceabilityIntact": true
+  }
+}

@@ -29,13 +29,18 @@
 - Mantenha o `Dockerfile` apto a deploy, com build multi-stage e execução sem root.
 - Não adicione Redis, broker ou outro serviço sem um caso de uso concreto.
 - Nunca grave segredos no repositório; documente variáveis em `.env.example`.
-- Execute `dotnet test` e `dotnet build --configuration Release` após alterações.
-- Mudanças de persistência exigem migration versionada.
+- Após restaurar dependências, execute `dotnet test --no-restore --disable-build-servers -m:1` e `dotnet build --configuration Release --no-restore --disable-build-servers -m:1`. A execução serial e sem build servers é o padrão neste workspace, não apenas um fallback.
+- Em ambientes Codex restritos, o VSTest precisa abrir um socket local. Execute o teste já com permissão ampliada; `SocketException (13): Permission denied` na inicialização do runner é limitação do sandbox, não falha da suíte.
+- Comandos `docker compose` precisam de acesso ao socket local do Docker e também devem ser executados com permissão ampliada nesses ambientes.
+- Os testes atuais de persistência usam EF Core InMemory. Testes verdes não provam que uma migration é aplicável ao PostgreSQL.
+- Mudanças de persistência exigem migration versionada e validação separada em PostgreSQL real. Use um banco temporário exclusivo da execução, aplique toda a cadeia de migrations e remova somente esse banco ao terminar; nunca reutilize, limpe ou remova o volume persistente do projeto para validar uma migration.
 
 ## Execução por épicos
 
 - O checklist, a ordem e os critérios de aceite ficam em `../ts-host/docs/ROADMAP.md`.
-- A execução solicitada de um épico desse roadmap autoriza explicitamente os commits e o push que compõem sua Definition of Done.
+- A execução solicitada de um épico desse roadmap autoriza explicitamente os commits, o push da branch de trabalho e a criação ou atualização do pull request que compõem sua Definition of Done.
 - Antes de iniciar, verifique o estado Git de todos os repositórios afetados e preserve mudanças que não pertençam ao épico.
-- Ao concluir, valide, atualize a documentação, crie um commit convencional e coeso por repositório afetado e faça push das branches correntes.
-- Um épico só pode ser marcado como concluído após todos os pushes; falha de commit ou push mantém o épico em andamento.
+- Antes da primeira alteração, crie a mesma branch de trabalho em todos os repositórios afetados, no formato `feat/eNN-descricao-curta`. Nunca implemente um épico em `main` ou `master`.
+- Se já houver commits do épico na branch protegida local, preserve-os criando a branch de trabalho no `HEAD` atual; não faça reset nem descarte alterações para corrigir o fluxo.
+- Ao concluir, valide, atualize a documentação, crie um commit convencional e coeso por repositório afetado, publique somente as branches de trabalho e abra ou atualize o pull request. Nunca faça push direto para `main` ou `master`.
+- Um épico só pode ser marcado como concluído após todos os pushes das branches e pull requests correspondentes; falha de commit, push ou criação do PR mantém o épico em andamento.
