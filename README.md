@@ -12,6 +12,9 @@ Esta primeira fatia estabelece:
 - PostgreSQL como persistência transacional;
 - fundação SaaS com banco e schema compartilhados e isolamento por `OrganizationId`;
 - organizações, usuários de plataforma e associações de usuário a organizações;
+- autenticação OIDC/OAuth 2.0 com Authorization Code + PKCE no frontend e validação JWT na API;
+- tenant ativo validado contra associação persistida, sem fallback de desenvolvimento e sem `OrganizationId` em payloads;
+- políticas de leitura, operação e administração derivadas do papel da associação;
 - domínio inicial de congelados (configuração, lote, validade e movimentação);
 - política central de validade de 90 dias corridos usando `DateOnly`;
 - fontes autoritativas mínimas de Oferta e Item Produzível;
@@ -27,6 +30,7 @@ Esta primeira fatia estabelece:
 - aquisições de plano com ledger e consumo compatível por FIFO, rastreado por item e aquisição;
 - ledger de crédito financeiro, desconto auditado, taxa preservada e cobrança somente do saldo restante;
 - auditoria imutável das condições e efeitos comerciais da confirmação;
+- auditoria transacional de ações críticas com ator confiável, tenant, instante e correlação;
 - matriz explícita de transições operacionais do Pedido, com versão otimista, idempotência e trilha histórica;
 - reagendamento atômico de Pedido confirmado, transferindo a reserva somente quando a nova data possui capacidade;
 - cancelamento com liberação de capacidade apenas antes da produção, estorno dos créditos nas aquisições de origem, devolução do crédito financeiro e cancelamento de cobranças pendentes;
@@ -55,7 +59,12 @@ POST /api/orders/{orderId}/confirmation
 POST /api/orders/{orderId}/status-transitions
 POST /api/orders/{orderId}/rescheduling
 POST /api/orders/{orderId}/cancellation
+GET  /api/session
 ```
+
+Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token precisa ter audiência `ts-api`, subject (`sub`) correspondente a um usuário ativo da plataforma e a claim `organization_id`. Para solicitar outra associação do mesmo usuário, o shell envia `X-Organization-Id`; a API só aceita o valor depois de confirmar usuário, Organização e associação ativos no banco. O header é uma solicitação de seleção, nunca autoridade de isolamento.
+
+Leituras aceitam qualquer associação ativa. Operações de Pedido e estoque aceitam `Owner`, `Administrator` e `Operator`; `DeliveryDriver` fica restrito a leituras até a integração logística do E13. Configuração de Catálogo, Produção, capacidade, Planos, restrições e Financeiro exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
 
 A entrada de produção, a criação/edição do Pedido, a configuração de capacidade, a confirmação e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento e cancelamento também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
 
@@ -67,9 +76,7 @@ O reagendamento autoritativo é permitido somente em `Confirmed`, antes do iníc
 
 Quando há congelados, `FrozenDisposition` explicita o destino físico. Em `Confirmed`, unidades ainda não separadas devem usar `ReturnToStock` e geram `OrderReversal` no mesmo lote. Em `InProduction` ou `InPacking`, o retorno exige `FrozenReturnInspection` com embalagem, temperatura e rastreabilidade íntegras. Em `InDelivery` ou `DeliveryFailed`, retorno ao estoque vendável é proibido; deve-se registrar `Quarantine` ou `Discarded`. Como a saída já ocorreu na confirmação, quarentena e descarte são destinos físicos auditados e não debitam o lote uma segunda vez.
 
-O tenant nunca é recebido no payload: ele é obtido da claim autenticada `organization_id`. A configuração de um provedor de identidade e as políticas de autorização ainda serão adicionadas antes de qualquer uso operacional real. Os endpoints auxiliares deste épico expõem apenas a fundação necessária para exercitar a confirmação; a gestão completa de Catálogo, Clientes, Planos e Financeiro permanece nos épicos E11 e E12.
-
-Em `Development`, a organização Sabor Santè é selecionada por uma configuração do servidor para manter os fluxos locais utilizáveis enquanto o provedor de identidade não foi escolhido. Esse fallback não funciona fora do ambiente de desenvolvimento; em produção, chamadas a `/api` sem uma identidade autenticada contendo `organization_id` recebem `401`.
+O provedor escolhido é o Keycloak, configurado como servidor OIDC substituível por outro emissor compatível. O `compose.yaml` fixa a versão local e importa um realm mínimo; produção deve usar HTTPS, credenciais próprias, persistência administrada e os valores `Authentication:Authority`/`Audience` do ambiente. Chamadas anônimas recebem `401`; identidade desconhecida, associação ausente/inativa e tentativa cross-tenant recebem `403`.
 
 ## Executar com Docker
 
@@ -78,17 +85,20 @@ cp .env.example .env
 docker compose up --build
 ```
 
-A API fica em `http://localhost:8080`. Verificações:
+A API fica em `http://localhost:8080` e o Keycloak local em `http://localhost:8081`. O realm de desenvolvimento cria `admin@saborsante.local` com senha temporária `change-me`; altere-a no primeiro login. Verificações:
 
 ```text
 GET /health/live
 GET /health/ready
 GET /openapi/v1.json (ambiente Development)
+GET /api/session (com Bearer token)
 ```
 
 Em desenvolvimento, as migrations pendentes são aplicadas na inicialização. Em produção, devem ser executadas como uma etapa explícita e única do deploy antes de subir novas réplicas.
 
 O PostgreSQL fica acessível apenas em `127.0.0.1:5433` por padrão, configurável por `POSTGRES_PORT`.
+
+O shell em `http://localhost:4173` usa Authorization Code + PKCE. Configure nele `VITE_API_URL`, `VITE_OIDC_AUTHORITY` e `VITE_OIDC_CLIENT_ID`; tokens ficam em `sessionStorage`, enquanto a organização selecionada permanece apenas no estado da sessão e é revalidada pela API a cada troca.
 
 ## Executar testes
 
@@ -120,6 +130,9 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 - Redis não foi adicionado: ainda não existe um caso de uso concreto que exija cache ou coordenação distribuída. Quando existir, será incluído no `compose.yaml` e acessado por uma abstração da aplicação.
 - O nome e a composição pertencem ao Item Produzível; regras comuns de venda pertencem à Oferta genérica de Congelados; apresentação e preço variável pertencem à `FrozenConfiguration`.
 - Dados de negócio implementam o contrato tenant-owned. Filtros globais do EF Core isolam leituras, `SaveChanges` rejeita escritas de outro tenant e chaves estrangeiras compostas impedem referências cruzadas entre organizações.
+- Keycloak é o provedor OIDC inicial; identidade externa e autorização de negócio continuam desacopladas. A API mapeia `sub` para `PlatformUser` e aplica a associação/papel persistidos localmente.
+- A seleção de empresa usa a claim como padrão e pode receber `X-Organization-Id`, mas nunca confia no identificador sem validar a associação ativa.
+- Eventos críticos geram `AuditEvent` no mesmo `SaveChanges`, preservando usuário de plataforma, Organização, instante UTC, recurso, ação e `X-Correlation-Id` (ou o identificador criado pelo servidor).
 - Unicidades de negócio e idempotência são locais à organização. A migration multi-tenant associa os dados existentes ao tenant inicial Sabor Santè.
 - A confirmação de Pedido usa transação `Serializable`, versão otimista e chave idempotente por Organização; itens congelados são alocados por validade, fabricação e ID estável.
 - Composição, preço e condições comerciais usados na confirmação são snapshots históricos; restrições impedem a operação antes do commit.

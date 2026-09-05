@@ -1,4 +1,6 @@
 @Ts_Api_HostAddress = http://localhost:8080
+@accessToken = cole-o-token-oidc-aqui
+@organizationId = 5f6c1eb9-6164-49e8-9349-e7d5f22b1f51
 
 GET {{Ts_Api_HostAddress}}/health/live
 Accept: application/json
@@ -10,7 +12,16 @@ Accept: application/json
 
 ###
 
+GET {{Ts_Api_HostAddress}}/api/session
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
+Accept: application/json
+
+###
+
 POST {{Ts_Api_HostAddress}}/api/catalog/offers
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -21,6 +32,8 @@ Content-Type: application/json
 ###
 
 POST {{Ts_Api_HostAddress}}/api/production/items
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -30,6 +43,8 @@ Content-Type: application/json
 ### Publique uma composição; versões posteriores não reescrevem snapshots já confirmados
 
 POST {{Ts_Api_HostAddress}}/api/production/items/00000000-0000-0000-0000-000000000000/compositions
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -46,6 +61,8 @@ Content-Type: application/json
 ### Contexto comercial mínimo; use o mesmo CustomerId do Pedido
 
 POST {{Ts_Api_HostAddress}}/api/plans/acquisitions
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -60,6 +77,8 @@ Content-Type: application/json
 ### Restrição sem conflito com a composição acima
 
 POST {{Ts_Api_HostAddress}}/api/customers/00000000-0000-0000-0000-000000000002/dietary-restrictions
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -67,18 +86,21 @@ Content-Type: application/json
 }
 
 POST {{Ts_Api_HostAddress}}/api/financial-credits
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
   "customerId": "00000000-0000-0000-0000-000000000002",
   "amount": 25.00,
   "reason": "Pagamento excedente",
-  "actorId": "00000000-0000-0000-0000-000000000001"
 }
 
 ### Oferta diária para compor um Pedido misto
 
 POST {{Ts_Api_HostAddress}}/api/catalog/offers
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -89,6 +111,8 @@ Content-Type: application/json
 ### Substitua os IDs pelos recursos criados acima
 
 POST {{Ts_Api_HostAddress}}/api/frozen-stock/configurations
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 
 {
@@ -103,6 +127,8 @@ Content-Type: application/json
 ### Substitua o ID pela configuração criada acima
 
 POST {{Ts_Api_HostAddress}}/api/frozen-stock/production-entries
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: frozen-production-2026-09-04-01
 
@@ -110,12 +136,13 @@ Idempotency-Key: frozen-production-2026-09-04-01
   "frozenConfigurationId": "00000000-0000-0000-0000-000000000000",
   "manufacturedOn": "2026-09-04",
   "producedQuantity": 24,
-  "actorId": "00000000-0000-0000-0000-000000000001"
 }
 
 ### Configure a capacidade; na primeira gravação, a versão esperada é zero
 
 PUT {{Ts_Api_HostAddress}}/api/daily-capacities/2026-09-05
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: capacity-2026-09-05-01
 
@@ -127,11 +154,15 @@ Idempotency-Key: capacity-2026-09-05-01
 ### Consulte capacidade total, reservada, disponível e versão
 
 GET {{Ts_Api_HostAddress}}/api/daily-capacities/2026-09-05
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Accept: application/json
 
 ### Crie o Pedido; substitua os IDs pelas ofertas/configuração criadas acima
 
 POST {{Ts_Api_HostAddress}}/api/orders
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-create-2026-09-05-01
 
@@ -156,11 +187,15 @@ Idempotency-Key: order-create-2026-09-05-01
 ### Consulte o Pedido e use a versão devolvida nas escritas seguintes
 
 GET {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Accept: application/json
 
 ### A edição substitui o rascunho inteiro e exige versão otimista
 
 PUT {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-edit-2026-09-05-01
 
@@ -181,11 +216,12 @@ Idempotency-Key: order-edit-2026-09-05-01
 ### Confirme usando a versão atual devolvida pela criação, edição ou consulta
 
 POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/confirmation
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-confirmation-2026-09-04-01
 
 {
-  "actorId": "00000000-0000-0000-0000-000000000001",
   "expectedVersion": 0,
   "planCredits": [
     {
@@ -202,38 +238,41 @@ Idempotency-Key: order-confirmation-2026-09-04-01
 ### Avance somente pela matriz permitida; use a versão devolvida pela operação anterior
 
 POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/status-transitions
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-production-2026-09-05-01
 
 {
   "newStatus": "InProduction",
   "reason": "Produção do dia iniciada",
-  "actorId": "00000000-0000-0000-0000-000000000001",
   "expectedVersion": 1
 }
 
 ### Reagende um Pedido ainda Confirmed; a capacidade da nova data deve existir
 
 POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/rescheduling
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-reschedule-2026-09-05-01
 
 {
   "newOperationalDate": "2026-09-06",
   "reason": "Solicitação do cliente",
-  "actorId": "00000000-0000-0000-0000-000000000001",
   "expectedVersion": 1
 }
 
 ### Cancele antes da separação e devolva congelados automaticamente ao mesmo lote
 
 POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/cancellation
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-cancel-2026-09-05-01
 
 {
   "reason": "Cliente desistiu",
-  "actorId": "00000000-0000-0000-0000-000000000001",
   "expectedVersion": 1,
   "commercialDisposition": "Reverse",
   "frozenDisposition": "ReturnToStock"
@@ -242,12 +281,13 @@ Idempotency-Key: order-cancel-2026-09-05-01
 ### Após a separação, ReturnToStock exige conferência humana completa
 
 POST {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000/cancellation
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
 Content-Type: application/json
 Idempotency-Key: order-cancel-inspected-2026-09-05-01
 
 {
   "reason": "Cancelamento com retorno conferido",
-  "actorId": "00000000-0000-0000-0000-000000000001",
   "expectedVersion": 2,
   "commercialDisposition": "Reverse",
   "frozenDisposition": "ReturnToStock",

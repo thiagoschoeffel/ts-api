@@ -39,5 +39,6 @@ public enum OrganizationRole
 {
     Owner = 1,
     Administrator = 2,
-    Member = 3,
+    Operator = 3,
+    DeliveryDriver = 4,
 }
