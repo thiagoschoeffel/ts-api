@@ -12,10 +12,23 @@ using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
 
-public sealed class AppDbContext(
-    DbContextOptions<AppDbContext> options,
-    IOrganizationContext organizationContext) : DbContext(options)
+public sealed class AppDbContext : DbContext
 {
+    private readonly IOrganizationContext organizationContext;
+    private readonly ICurrentUserContext? currentUserContext;
+    private readonly TimeProvider timeProvider;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, IOrganizationContext organizationContext)
+        : this(options, organizationContext, null, TimeProvider.System) { }
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, IOrganizationContext organizationContext,
+        ICurrentUserContext? currentUserContext, TimeProvider timeProvider) : base(options)
+    {
+        this.organizationContext = organizationContext;
+        this.currentUserContext = currentUserContext;
+        this.timeProvider = timeProvider;
+    }
+
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<PlatformUser> Users => Set<PlatformUser>();
     public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
@@ -39,6 +52,7 @@ public sealed class AppDbContext(
     public DbSet<OrderPlanCreditAllocation> OrderPlanCreditAllocations => Set<OrderPlanCreditAllocation>();
     public DbSet<OrderConfirmationAudit> OrderConfirmationAudits => Set<OrderConfirmationAudit>();
     public DbSet<OrderLifecycleEvent> OrderLifecycleEvents => Set<OrderLifecycleEvent>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -74,6 +88,22 @@ public sealed class AppDbContext(
                 .WithMany()
                 .HasForeignKey(item => item.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<AuditEvent>(configuration =>
+        {
+            configuration.ToTable("audit_events");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Action).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.ResourceType).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.CorrelationId).HasMaxLength(100).IsRequired();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.ActorId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.OccurredAt });
+            configuration.HasIndex(item => new { item.OrganizationId, item.CorrelationId });
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
@@ -493,6 +523,7 @@ public sealed class AppDbContext(
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        AddAuditEvents();
         ValidateTenantWrites();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -501,8 +532,44 @@ public sealed class AppDbContext(
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
+        AddAuditEvents();
         ValidateTenantWrites();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void AddAuditEvents()
+    {
+        if (currentUserContext?.IsAvailable != true)
+        {
+            return;
+        }
+
+        var candidates = ChangeTracker.Entries()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity switch
+            {
+                OrderConfirmationAudit audit => ("Order.Confirmed", "Order", audit.OrderId),
+                OrderLifecycleEvent lifecycle => ($"Order.{lifecycle.Type}", "Order", lifecycle.OrderId),
+                FrozenStockMovement movement => ($"FrozenStock.{movement.Type}", "FrozenLot", movement.FrozenLotId),
+                FinancialCreditMovement movement => ($"FinancialCredit.{movement.Type}", "FinancialCreditMovement", movement.Id),
+                _ => default,
+            })
+            .Where(candidate => candidate.Item3 != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        foreach (var (action, resourceType, resourceId) in candidates)
+        {
+            var alreadyTracked = ChangeTracker.Entries<AuditEvent>().Any(entry =>
+                entry.Entity.Action == action && entry.Entity.ResourceId == resourceId
+                && entry.Entity.CorrelationId == currentUserContext.CorrelationId);
+            if (!alreadyTracked)
+            {
+                AuditEvents.Add(AuditEvent.Create(organizationContext.OrganizationId,
+                    currentUserContext.UserId, action, resourceType, resourceId,
+                    timeProvider.GetUtcNow(), currentUserContext.CorrelationId));
+            }
+        }
     }
 
     private void ValidateTenantWrites()

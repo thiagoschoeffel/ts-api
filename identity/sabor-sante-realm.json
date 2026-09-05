@@ -1,0 +1,75 @@
+{
+  "realm": "sabor-sante",
+  "displayName": "Sabor Santè",
+  "enabled": true,
+  "sslRequired": "none",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["pt-BR"],
+  "defaultLocale": "pt-BR",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "clients": [
+    {
+      "clientId": "ts-api",
+      "name": "Sabor Santè API",
+      "enabled": true,
+      "bearerOnly": true
+    },
+    {
+      "clientId": "ts-host",
+      "name": "Sabor Santè Web",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:4173/*"],
+      "webOrigins": ["http://localhost:4173"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:4173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "ts-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "ts-api",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "active-organization",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "organization_id",
+            "claim.name": "organization_id",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "36f163b5-6e91-4e88-95c9-72830e445672",
+      "username": "admin@saborsante.local",
+      "email": "admin@saborsante.local",
+      "firstName": "Administrador",
+      "lastName": "Sabor Santè",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "organization_id": ["5f6c1eb9-6164-49e8-9349-e7d5f22b1f51"]
+      },
+      "credentials": [
+        { "type": "password", "value": "change-me", "temporary": true }
+      ]
+    }
+  ]
+}

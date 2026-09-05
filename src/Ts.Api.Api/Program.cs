@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Ts.Api.Api;
 using Ts.Api.Application.Catalog;
@@ -8,6 +10,7 @@ using Ts.Api.Application.Orders;
 using Ts.Api.Application.Production;
 using Ts.Api.Infrastructure;
 using Ts.Api.Infrastructure.Persistence;
+using Ts.Api.Domain.Organizations;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,7 +18,44 @@ builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<IOrganizationContext, HttpOrganizationContext>();
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
+    .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .WithExposedHeaders("X-Correlation-Id")));
+builder.Services.AddScoped<HttpRequestContext>();
+builder.Services.AddScoped<IOrganizationContext>(provider => provider.GetRequiredService<HttpRequestContext>());
+builder.Services.AddScoped<ICurrentUserContext>(provider => provider.GetRequiredService<HttpRequestContext>());
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = builder.Configuration["Authentication:Authority"];
+        var metadataAddress = builder.Configuration["Authentication:MetadataAddress"];
+        if (!string.IsNullOrWhiteSpace(metadataAddress))
+        {
+            options.MetadataAddress = metadataAddress;
+        }
+        options.Audience = builder.Configuration["Authentication:Audience"];
+        options.RequireHttpsMetadata = builder.Configuration.GetValue("Authentication:RequireHttpsMetadata", true);
+        options.MapInboundClaims = false;
+    });
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(AuthorizationPolicies.Read, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new MembershipRoleRequirement(OrganizationRole.Owner,
+            OrganizationRole.Administrator, OrganizationRole.Operator,
+            OrganizationRole.DeliveryDriver)));
+    options.AddPolicy(AuthorizationPolicies.Operate, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new MembershipRoleRequirement(OrganizationRole.Owner,
+            OrganizationRole.Administrator, OrganizationRole.Operator)));
+    options.AddPolicy(AuthorizationPolicies.Administer, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new MembershipRoleRequirement(OrganizationRole.Owner,
+            OrganizationRole.Administrator)));
+});
+builder.Services.AddSingleton<IAuthorizationHandler, MembershipAuthorizationHandler>();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CreateOfferHandler>();
@@ -41,7 +81,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseCors();
+app.UseAuthentication();
 app.UseMiddleware<OrganizationContextMiddleware>();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {
