@@ -4,6 +4,7 @@ using Npgsql;
 using Ts.Api.Application.Catalog;
 using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
+using Ts.Api.Application.Menus;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
@@ -11,6 +12,7 @@ using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.Customers;
 using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
+using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Plans;
@@ -107,6 +109,52 @@ public sealed class ProducibleItemStore(AppDbContext database) : IProducibleItem
 
     public Task SaveChangesAsync(CancellationToken cancellationToken) =>
         database.SaveChangesAsync(cancellationToken);
+}
+
+public sealed class CatalogManagementStore(AppDbContext database) : ICatalogManagementStore
+{
+    public async Task<IReadOnlyList<CatalogOffer>> GetOffersAsync(CancellationToken token) =>
+        await database.CatalogOffers.OrderBy(x => x.Name).ToListAsync(token);
+    public Task<CatalogOffer?> FindOfferAsync(Guid id, CancellationToken token) => database.CatalogOffers.SingleOrDefaultAsync(x => x.Id == id, token);
+    public async Task<IReadOnlyList<CatalogOfferVersion>> GetOfferVersionsAsync(IReadOnlyCollection<Guid> ids, CancellationToken token) =>
+        await database.CatalogOfferVersions.Where(x => ids.Contains(x.OfferId)).ToListAsync(token);
+    public async Task<IReadOnlyList<ComponentType>> GetComponentTypesAsync(CancellationToken token) => await database.ComponentTypes.OrderBy(x => x.Name).ToListAsync(token);
+    public Task<ComponentType?> FindComponentTypeAsync(Guid id, CancellationToken token) => database.ComponentTypes.SingleOrDefaultAsync(x => x.Id == id, token);
+    public async Task<IReadOnlyList<CatalogAddon>> GetAddonsAsync(CancellationToken token) => await database.CatalogAddons.OrderBy(x => x.Name).ToListAsync(token);
+    public Task<CatalogAddon?> FindAddonAsync(Guid id, CancellationToken token) => database.CatalogAddons.SingleOrDefaultAsync(x => x.Id == id, token);
+    public async Task<IReadOnlyList<ProducibleItem>> GetProduciblesAsync(CancellationToken token) => await database.ProducibleItems.OrderBy(x => x.Name).ToListAsync(token);
+    public Task<ProducibleItem?> FindProducibleAsync(Guid id, CancellationToken token) => database.ProducibleItems.SingleOrDefaultAsync(x => x.Id == id, token);
+    public async Task<IReadOnlyList<ProducibleComposition>> GetCompositionsAsync(IReadOnlyCollection<Guid> ids, CancellationToken token) =>
+        await database.ProducibleCompositions.Include("_components").Where(x => ids.Contains(x.ProducibleItemId)).ToListAsync(token);
+    public Task<bool> OfferNameExistsAsync(string name, Guid? exceptId, CancellationToken token) => database.CatalogOffers.AnyAsync(x => x.NormalizedName == name.ToUpper() && x.Id != exceptId, token);
+    public Task<bool> ComponentTypeNameExistsAsync(string name, Guid? exceptId, CancellationToken token) => database.ComponentTypes.AnyAsync(x => x.NormalizedName == name.ToUpper() && x.Id != exceptId, token);
+    public Task<bool> AddonNameExistsAsync(string name, Guid? exceptId, CancellationToken token) => database.CatalogAddons.AnyAsync(x => x.NormalizedName == name.ToUpper() && x.Id != exceptId, token);
+    public Task<bool> ProducibleNameExistsAsync(string name, Guid? exceptId, CancellationToken token) => database.ProducibleItems.AnyAsync(x => x.NormalizedName == name.ToUpper() && x.Id != exceptId, token);
+    public void Add(object entity) => database.Add(entity);
+    public Task SaveChangesAsync(CancellationToken token) => database.SaveChangesAsync(token);
+}
+
+public sealed class MenuStore(AppDbContext database) : IMenuStore
+{
+    public async Task<IReadOnlyList<DailyMenu>> GetMenusAsync(DateOnly? from, DateOnly? to, CancellationToken token) =>
+        await database.DailyMenus.Include("_options").Include("_offers")
+            .Where(x => (!from.HasValue || x.Date >= from) && (!to.HasValue || x.Date <= to))
+            .OrderBy(x => x.Date).AsSplitQuery().ToListAsync(token);
+    public Task<DailyMenu?> FindMenuAsync(DateOnly date, CancellationToken token) => database.DailyMenus
+        .Include("_options").Include("_offers").AsSplitQuery().SingleOrDefaultAsync(x => x.Date == date, token);
+    public async Task<IReadOnlyList<CatalogOffer>> GetOffersAsync(IReadOnlyCollection<Guid> ids, CancellationToken token) =>
+        await database.CatalogOffers.Where(x => ids.Contains(x.Id)).ToListAsync(token);
+    public async Task<IReadOnlyList<ProducibleItem>> GetProduciblesAsync(IReadOnlyCollection<Guid> ids, CancellationToken token) =>
+        await database.ProducibleItems.Where(x => ids.Contains(x.Id)).ToListAsync(token);
+    public Task<WeeklyMenuPlan?> FindWeeklyPlanAsync(DateOnly weekStart, CancellationToken token) =>
+        database.WeeklyMenuPlans.SingleOrDefaultAsync(x => x.WeekStart == weekStart, token);
+    public void Add(object entity) => database.Add(entity);
+    public void RemoveMenuChildren(DailyMenu menu)
+    {
+        database.DailyMenuOptions.RemoveRange(menu.Options);
+        database.DailyMenuOffers.RemoveRange(menu.Offers);
+    }
+    public Task SaveChangesAsync(CancellationToken token) => database.SaveChangesAsync(token);
 }
 
 public sealed class FrozenConfigurationStore(AppDbContext database) : IFrozenConfigurationStore
@@ -584,6 +632,18 @@ public sealed class OrderManagementStore(AppDbContext database) :
         item => item.Id == producibleItemId && item.IsActive,
         cancellationToken);
 
+    public async Task<MenuOfferAuthorization?> FindMenuOfferAuthorizationAsync(DateOnly date, Guid offerId,
+        Guid? producibleItemId, CancellationToken cancellationToken)
+    {
+        var menu = await database.DailyMenus.Include("_offers").Include("_options").AsSplitQuery()
+            .SingleOrDefaultAsync(x => x.Date == date, cancellationToken);
+        if (menu is null) return new(false, 0, false);
+        var offer = menu.Offers.SingleOrDefault(x => x.OfferId == offerId);
+        return new(menu.Status == DailyMenuStatus.Published && offer?.Availability == MenuAvailability.Available,
+            offer?.EffectivePrice ?? 0,
+            producibleItemId is null || menu.Options.Any(x => x.ProducibleItemId == producibleItemId && x.Availability == MenuAvailability.Available));
+    }
+
     public async Task AddAsync(Order order, CancellationToken cancellationToken) =>
         await database.Orders.AddAsync(order, cancellationToken);
 
@@ -665,6 +725,11 @@ public sealed class OrderQueryStore(AppDbContext database) : IOrderQueryStore
         .ThenBy(item => item.ManufacturedOn)
         .ThenBy(item => item.Id)
         .ToListAsync(cancellationToken);
+
+    public Task<DailyMenu?> GetPublishedMenuAsync(DateOnly date, CancellationToken cancellationToken) => database.DailyMenus
+        .Include("_options").Include("_offers").AsSplitQuery()
+        .SingleOrDefaultAsync(item => item.Date == date && item.Status == DailyMenuStatus.Published, cancellationToken);
+    public Task<bool> EnforcesPublishedMenusAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 }
 
 public sealed class OrderConfirmationSetupStore(AppDbContext database) : IOrderConfirmationSetupStore

@@ -23,12 +23,16 @@ public interface IOrderManagementStore
     Task<ProducibleItem?> FindActiveProducibleItemAsync(
         Guid producibleItemId,
         CancellationToken cancellationToken);
+    Task<MenuOfferAuthorization?> FindMenuOfferAuthorizationAsync(DateOnly operationalDate, Guid offerId,
+        Guid? producibleItemId, CancellationToken cancellationToken) => Task.FromResult<MenuOfferAuthorization?>(null);
     Task AddAsync(Order order, CancellationToken cancellationToken);
     void ReplaceItems(
         IReadOnlyCollection<OrderItem> previousItems,
         IReadOnlyCollection<OrderItem> replacementItems);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }
+
+public sealed record MenuOfferAuthorization(bool IsPublishedAndAvailable, decimal EffectivePrice, bool ProducibleIsAvailable);
 
 public sealed class CreateOrderHandler(
     IOrderManagementStore store,
@@ -65,7 +69,7 @@ public sealed class CreateOrderHandler(
             return OrderResultMapper.Map(previous);
         }
 
-        var definitions = await OrderItemResolver.ResolveAsync(store, command.Items, cancellationToken);
+        var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
         var order = Order.CreateDraft(
             organizationContext.OrganizationId,
             command.CustomerId,
@@ -135,7 +139,7 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
             throw new ConflictException("O pedido foi alterado. Recarregue os dados antes de editar.");
         }
 
-        var definitions = await OrderItemResolver.ResolveAsync(store, command.Items, cancellationToken);
+        var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
         var previousItems = order.Items.ToArray();
         order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, command.CustomerName);
         store.ReplaceItems(previousItems, order.Items);
@@ -158,6 +162,7 @@ internal static class OrderItemResolver
 {
     public static async Task<IReadOnlyCollection<OrderItemDefinition>> ResolveAsync(
         IOrderManagementStore store,
+        DateOnly operationalDate,
         IReadOnlyCollection<OrderItemInput> inputs,
         CancellationToken cancellationToken)
     {
@@ -192,6 +197,13 @@ internal static class OrderItemResolver
                 var dailyProducibleItem = await store.FindActiveProducibleItemAsync(
                     producibleItemId, cancellationToken)
                     ?? throw new DomainException("O item produzível informado não existe ou está inativo.");
+
+                var authorization = await store.FindMenuOfferAuthorizationAsync(operationalDate, offer.Id,
+                    dailyProducibleItem.Id, cancellationToken);
+                if (authorization is not null && (!authorization.IsPublishedAndAvailable || !authorization.ProducibleIsAvailable))
+                    throw new DomainException("A oferta ou opção escolhida não está disponível no cardápio publicado desse dia.");
+                if (authorization is not null && dailyPrice != authorization.EffectivePrice)
+                    throw new DomainException("O preço informado não corresponde ao preço publicado para o dia.");
 
                 definitions.Add(new OrderItemDefinition(
                     offer.Id,

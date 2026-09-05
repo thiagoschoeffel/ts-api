@@ -2,6 +2,7 @@ using Ts.Api.Application.Common;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
+using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Application.Orders;
@@ -60,9 +61,13 @@ public sealed record OrderDetailsResult(
 public sealed record OrderAuthoringOfferResult(
     Guid Id,
     string Name,
-    OfferFulfillmentMode FulfillmentMode);
+    OfferFulfillmentMode FulfillmentMode,
+    decimal? EffectivePrice = null,
+    bool RequiresMenuChoice = false);
 
 public sealed record OrderAuthoringProducibleResult(Guid Id, string Name);
+public sealed record OrderAuthoringMenuOptionResult(Guid Id, string Category, Guid ProducibleItemId,
+    string ProducibleItemName, MenuAvailability Availability);
 
 public sealed record OrderAuthoringFrozenConfigurationResult(
     Guid Id,
@@ -77,7 +82,8 @@ public sealed record OrderAuthoringFrozenConfigurationResult(
 public sealed record OrderAuthoringContextResult(
     IReadOnlyCollection<OrderAuthoringOfferResult> Offers,
     IReadOnlyCollection<OrderAuthoringProducibleResult> Producibles,
-    IReadOnlyCollection<OrderAuthoringFrozenConfigurationResult> FrozenConfigurations);
+    IReadOnlyCollection<OrderAuthoringFrozenConfigurationResult> FrozenConfigurations,
+    IReadOnlyCollection<OrderAuthoringMenuOptionResult>? MenuOptions = null);
 
 public interface IOrderQueryStore
 {
@@ -87,6 +93,8 @@ public interface IOrderQueryStore
     Task<IReadOnlyList<ProducibleItem>> GetActiveProduciblesAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<FrozenConfiguration>> GetActiveFrozenConfigurationsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<FrozenLot>> GetSellableFrozenLotsAsync(DateOnly sellableOn, CancellationToken cancellationToken);
+    Task<DailyMenu?> GetPublishedMenuAsync(DateOnly date, CancellationToken cancellationToken) => Task.FromResult<DailyMenu?>(null);
+    Task<bool> EnforcesPublishedMenusAsync(CancellationToken cancellationToken) => Task.FromResult(false);
 }
 
 public sealed class ListOrdersHandler(IOrderQueryStore store)
@@ -140,9 +148,15 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
         var configurations = await store.GetActiveFrozenConfigurationsAsync(cancellationToken);
         var lots = await store.GetSellableFrozenLotsAsync(sellableOn, cancellationToken);
         var producibleNames = producibles.ToDictionary(item => item.Id, item => item.Name);
+        var menu = await store.GetPublishedMenuAsync(sellableOn, cancellationToken);
+        var enforcesPublishedMenus = await store.EnforcesPublishedMenusAsync(cancellationToken);
+        var dailyOffers = menu?.Offers.Where(x => x.Availability == MenuAvailability.Available).ToDictionary(x => x.OfferId);
+        var visibleOffers = menu is null && !enforcesPublishedMenus ? offers
+            : offers.Where(x => x.FulfillmentMode == OfferFulfillmentMode.FrozenStock || (dailyOffers?.ContainsKey(x.Id) ?? false)).ToArray();
 
         return new OrderAuthoringContextResult(
-            offers.Select(item => new OrderAuthoringOfferResult(item.Id, item.Name, item.FulfillmentMode)).ToArray(),
+            visibleOffers.Select(item => new OrderAuthoringOfferResult(item.Id, item.Name, item.FulfillmentMode,
+                dailyOffers?.GetValueOrDefault(item.Id)?.EffectivePrice, item.RequiresMenuChoice)).ToArray(),
             producibles.Select(item => new OrderAuthoringProducibleResult(item.Id, item.Name)).ToArray(),
             configurations.Select(configuration =>
             {
@@ -153,6 +167,8 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
                     configuration.Presentation, configuration.UnitPrice,
                     eligibleLots.Sum(lot => lot.Balance),
                     eligibleLots.Where(lot => lot.Balance > 0).MinBy(lot => lot.ExpiresOn)?.ExpiresOn);
-            }).ToArray());
+            }).ToArray(),
+            menu?.Options.Select(option => new OrderAuthoringMenuOptionResult(option.Id, option.Category,
+                option.ProducibleItemId, producibleNames.GetValueOrDefault(option.ProducibleItemId, "Item indisponível"), option.Availability)).ToArray() ?? []);
     }
 }

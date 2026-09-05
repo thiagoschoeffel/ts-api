@@ -30,6 +30,14 @@ public sealed class PublishCompositionHandler(
     {
         _ = await store.FindProducibleItemAsync(command.ProducibleItemId, cancellationToken)
             ?? throw new ResourceNotFoundException("Item produzível não encontrado.");
+        foreach (var referenceId in command.Components.Where(item => item.ReferencedProducibleItemId.HasValue)
+                     .Select(item => item.ReferencedProducibleItemId!.Value).Distinct())
+        {
+            if (referenceId == command.ProducibleItemId)
+                throw new DomainException("Um item produzível não pode referenciar a si próprio na composição.");
+            _ = await store.FindProducibleItemAsync(referenceId, cancellationToken)
+                ?? throw new DomainException("A composição referencia um item produzível inexistente ou inativo.");
+        }
         var version = await store.GetNextCompositionVersionAsync(command.ProducibleItemId, cancellationToken);
         var composition = ProducibleComposition.Publish(
             organizationContext.OrganizationId, command.ProducibleItemId, version,

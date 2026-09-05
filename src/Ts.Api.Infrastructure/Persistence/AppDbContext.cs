@@ -5,6 +5,7 @@ using Ts.Api.Domain.Common;
 using Ts.Api.Domain.Customers;
 using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
+using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Orders;
@@ -34,6 +35,9 @@ public sealed class AppDbContext : DbContext
     public DbSet<PlatformUser> Users => Set<PlatformUser>();
     public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
     public DbSet<CatalogOffer> CatalogOffers => Set<CatalogOffer>();
+    public DbSet<ComponentType> ComponentTypes => Set<ComponentType>();
+    public DbSet<CatalogAddon> CatalogAddons => Set<CatalogAddon>();
+    public DbSet<CatalogOfferVersion> CatalogOfferVersions => Set<CatalogOfferVersion>();
     public DbSet<ProducibleItem> ProducibleItems => Set<ProducibleItem>();
     public DbSet<FrozenConfiguration> FrozenConfigurations => Set<FrozenConfiguration>();
     public DbSet<FrozenLot> FrozenLots => Set<FrozenLot>();
@@ -56,6 +60,10 @@ public sealed class AppDbContext : DbContext
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     public DbSet<PackingRecord> PackingRecords => Set<PackingRecord>();
     public DbSet<LabelPrintAttempt> LabelPrintAttempts => Set<LabelPrintAttempt>();
+    public DbSet<DailyMenu> DailyMenus => Set<DailyMenu>();
+    public DbSet<DailyMenuOption> DailyMenuOptions => Set<DailyMenuOption>();
+    public DbSet<DailyMenuOffer> DailyMenuOffers => Set<DailyMenuOffer>();
+    public DbSet<WeeklyMenuPlan> WeeklyMenuPlans => Set<WeeklyMenuPlan>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -157,7 +165,47 @@ public sealed class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
             configuration.Property(item => item.NormalizedName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.Description).HasMaxLength(4_000);
+            configuration.Property(item => item.BasePrice).HasPrecision(12, 2);
             configuration.HasIndex(item => new { item.OrganizationId, item.NormalizedName }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<ComponentType>(configuration =>
+        {
+            configuration.ToTable("component_types"); configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.Name).HasMaxLength(120).IsRequired();
+            configuration.Property(item => item.NormalizedName).HasMaxLength(120).IsRequired();
+            configuration.Property(item => item.Description).HasMaxLength(1_000);
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.NormalizedName }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<CatalogAddon>(configuration =>
+        {
+            configuration.ToTable("catalog_addons"); configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.NormalizedName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.Price).HasPrecision(12, 2);
+            configuration.Property(item => item.OperationalQuantity).HasPrecision(12, 3);
+            configuration.Property(item => item.MeasurementUnit).HasMaxLength(30);
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<ProducibleItem>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.ProducibleItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
+            configuration.HasIndex(item => new { item.OrganizationId, item.NormalizedName }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<CatalogOfferVersion>(configuration =>
+        {
+            configuration.ToTable("catalog_offer_versions"); configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.ConfigurationJson).HasColumnType("jsonb").IsRequired();
+            configuration.HasOne<CatalogOffer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.OfferId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.OfferId, item.Version }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
@@ -172,7 +220,57 @@ public sealed class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
             configuration.Property(item => item.NormalizedName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.Description).HasMaxLength(4_000);
+            configuration.Property(item => item.Category).HasMaxLength(80).IsRequired();
+            configuration.Property(item => item.MeasurementUnit).HasMaxLength(30).IsRequired();
             configuration.HasIndex(item => new { item.OrganizationId, item.NormalizedName }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<DailyMenu>(configuration =>
+        {
+            configuration.ToTable("daily_menus"); configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Ignore(item => item.Options); configuration.Ignore(item => item.Offers);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasMany<DailyMenuOption>("_options").WithOne().HasForeignKey(item => new { item.OrganizationId, item.DailyMenuId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.HasMany<DailyMenuOffer>("_offers").WithOne().HasForeignKey(item => new { item.OrganizationId, item.DailyMenuId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Cascade);
+            configuration.Navigation("_options").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.Navigation("_offers").UsePropertyAccessMode(PropertyAccessMode.Field);
+            configuration.HasIndex(item => new { item.OrganizationId, item.Date }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<DailyMenuOption>(configuration =>
+        {
+            configuration.ToTable("daily_menu_options"); configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Category).HasMaxLength(100).IsRequired();
+            configuration.HasOne<ProducibleItem>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.ProducibleItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.DailyMenuId, item.Category }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<DailyMenuOffer>(configuration =>
+        {
+            configuration.ToTable("daily_menu_offers"); configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.EffectivePrice).HasPrecision(12, 2);
+            configuration.HasOne<CatalogOffer>().WithMany().HasForeignKey(item => new { item.OrganizationId, item.OfferId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.DailyMenuId, item.OfferId }).IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.DailyMenuId, item.DisplayOrder }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<WeeklyMenuPlan>(configuration =>
+        {
+            configuration.ToTable("weekly_menu_plans"); configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.DaysJson).HasColumnType("jsonb").IsRequired();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.WeekStart }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
@@ -441,8 +539,12 @@ public sealed class AppDbContext : DbContext
             configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
             configuration.Property(item => item.MeasurementUnit).HasMaxLength(30).IsRequired();
             configuration.Property(item => item.DietaryMarkers).HasMaxLength(500).IsRequired();
+            configuration.Property(item => item.Kind).HasMaxLength(30).IsRequired();
             configuration.Property(item => item.Quantity).HasPrecision(12, 3);
             configuration.Ignore(item => item.Markers);
+            configuration.HasOne<ProducibleItem>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.ReferencedProducibleItemId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 

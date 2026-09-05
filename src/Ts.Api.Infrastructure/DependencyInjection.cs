@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Ts.Api.Application.Catalog;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
+using Ts.Api.Application.Menus;
 using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
 using Ts.Api.Infrastructure.Persistence;
@@ -22,6 +23,8 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
         services.AddScoped<ICatalogOfferStore, CatalogOfferStore>();
         services.AddScoped<IProducibleItemStore, ProducibleItemStore>();
+        services.AddScoped<ICatalogManagementStore, CatalogManagementStore>();
+        services.AddScoped<IMenuStore, MenuStore>();
         services.AddScoped<IFrozenConfigurationStore, FrozenConfigurationStore>();
         services.AddScoped<IFrozenProductionStore, FrozenProductionStore>();
         services.AddScoped<IFrozenStockManagementStore, FrozenStockManagementStore>();
