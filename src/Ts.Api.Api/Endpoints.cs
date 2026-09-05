@@ -88,10 +88,11 @@ public static class Endpoints
             .Join(database.Organizations.IgnoreQueryFilters().Where(item => item.IsActive),
                 membership => membership.OrganizationId,
                 organization => organization.Id,
-                (membership, organization) => new SessionOrganization(
-                    organization.Id, organization.Name, organization.Slug, membership.Role,
-                    organization.Id == organizationContext.OrganizationId))
-            .OrderBy(item => item.Name)
+                (membership, organization) => new { Membership = membership, Organization = organization })
+            .OrderBy(item => item.Organization.Name)
+            .Select(item => new SessionOrganization(
+                item.Organization.Id, item.Organization.Name, item.Organization.Slug, item.Membership.Role,
+                item.Organization.Id == organizationContext.OrganizationId))
             .ToArrayAsync(cancellationToken);
         return TypedResults.Ok(new SessionResponse(user.Id, user.DisplayName,
             organizationContext.OrganizationId, memberships));
