@@ -6,6 +6,7 @@ using Ts.Api.Domain.Customers;
 using Ts.Api.Domain.Finance;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Organizations;
+using Ts.Api.Domain.Operations;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Plans;
 using Ts.Api.Domain.Production;
@@ -53,6 +54,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<OrderConfirmationAudit> OrderConfirmationAudits => Set<OrderConfirmationAudit>();
     public DbSet<OrderLifecycleEvent> OrderLifecycleEvents => Set<OrderLifecycleEvent>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<PackingRecord> PackingRecords => Set<PackingRecord>();
+    public DbSet<LabelPrintAttempt> LabelPrintAttempts => Set<LabelPrintAttempt>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -104,6 +107,42 @@ public sealed class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.HasIndex(item => new { item.OrganizationId, item.OccurredAt });
             configuration.HasIndex(item => new { item.OrganizationId, item.CorrelationId });
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<PackingRecord>(configuration =>
+        {
+            configuration.ToTable("packing_records");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.SnapshotJson).HasColumnType("jsonb").IsRequired();
+            configuration.HasOne<Order>().WithOne()
+                .HasForeignKey<PackingRecord>(item => new { item.OrganizationId, item.OrderId })
+                .HasPrincipalKey<Order>(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany()
+                .HasForeignKey(item => item.PackedBy).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.OrderId }).IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<LabelPrintAttempt>(configuration =>
+        {
+            configuration.ToTable("label_print_attempts");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.SelectionJson).HasColumnType("jsonb").IsRequired();
+            configuration.Property(item => item.ErrorMessage).HasMaxLength(2_000);
+            configuration.HasOne<PackingRecord>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.PackingRecordId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany()
+                .HasForeignKey(item => item.AttemptedBy).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.PackingRecordId, item.AttemptedAt });
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
@@ -225,6 +264,7 @@ public sealed class AppDbContext : DbContext
         modelBuilder.Entity<Order>(configuration =>
         {
             configuration.ToTable("orders");
+            configuration.Property(item => item.CustomerNameSnapshot).HasMaxLength(160).IsRequired();
             configuration.HasKey(item => item.Id);
             configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
             configuration.HasOne<Organization>()
@@ -556,6 +596,8 @@ public sealed class AppDbContext : DbContext
                 OrderLifecycleEvent lifecycle => ($"Order.{lifecycle.Type}", "Order", lifecycle.OrderId),
                 FrozenStockMovement movement => ($"FrozenStock.{movement.Type}", "FrozenLot", movement.FrozenLotId),
                 FinancialCreditMovement movement => ($"FinancialCredit.{movement.Type}", "FinancialCreditMovement", movement.Id),
+                PackingRecord packing => ("Order.Packed", "Order", packing.OrderId),
+                LabelPrintAttempt attempt => ($"LabelPrint.{attempt.Status}", "PackingRecord", attempt.PackingRecordId),
                 _ => default,
             })
             .Where(candidate => candidate.Item3 != Guid.Empty)

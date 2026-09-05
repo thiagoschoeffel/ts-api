@@ -56,7 +56,8 @@ public sealed class CreateOrderHandler(
                     previous,
                     command.CustomerId,
                     command.OperationalDate,
-                    command.Items))
+                    command.Items,
+                    command.CustomerName))
             {
                 throw new ConflictException("A chave de idempotência já foi usada com outro conteúdo de pedido.");
             }
@@ -70,7 +71,8 @@ public sealed class CreateOrderHandler(
             command.CustomerId,
             command.OperationalDate,
             definitions,
-            idempotencyKey);
+            idempotencyKey,
+            command.CustomerName);
         await store.AddAsync(order, cancellationToken);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
@@ -111,7 +113,8 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
                     previous,
                     command.CustomerId,
                     command.OperationalDate,
-                    command.Items))
+                    command.Items,
+                    command.CustomerName))
             {
                 throw new ConflictException(
                     "A chave de idempotência já foi usada para outro pedido ou conteúdo.");
@@ -134,7 +137,7 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
 
         var definitions = await OrderItemResolver.ResolveAsync(store, command.Items, cancellationToken);
         var previousItems = order.Items.ToArray();
-        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey);
+        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, command.CustomerName);
         store.ReplaceItems(previousItems, order.Items);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
@@ -251,10 +254,12 @@ internal static class OrderResultMapper
         Order order,
         Guid customerId,
         DateOnly operationalDate,
-        IReadOnlyCollection<OrderItemInput> inputs)
+        IReadOnlyCollection<OrderItemInput> inputs,
+        string? customerName = null)
     {
         if (order.CustomerId != customerId
             || order.OperationalDate != operationalDate
+            || customerName is not null && order.CustomerNameSnapshot != customerName.Trim()
             || order.Items.Count != inputs.Count)
         {
             return false;

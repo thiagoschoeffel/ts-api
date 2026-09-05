@@ -2,9 +2,9 @@
 
 API autoritativa da Sabor Santè, construída em .NET 10 e organizada como monólito modular.
 
-> **Estado atual:** os épicos E02–E09 estão concluídos. A fundação autoritativa,
+> **Estado atual:** os épicos E02–E10 estão concluídos. A fundação autoritativa,
 > o ciclo transacional de Pedidos e as integrações de Congelados, Pedidos e
-> capacidade estão disponíveis; Produção e Embalagem são a próxima fatia.
+> capacidade, Produção, Embalagem e histórico de impressão estão disponíveis.
 
 ## Estado atual
 
@@ -41,6 +41,10 @@ As fatias implementadas estabelecem:
 - reagendamento atômico de Pedido confirmado, transferindo a reserva somente quando a nova data possui capacidade;
 - cancelamento com liberação de capacidade apenas antes da produção, estorno dos créditos nas aquisições de origem, devolução do crédito financeiro e cancelamento de cobranças pendentes;
 - destinação rastreável de congelados cancelados: retorno ao mesmo lote antes da separação, conferência humana completa após separação e quarentena/descarte depois da expedição;
+- consulta diária de Produção derivada de Pedidos confirmados e de seus componentes efetivos, sem incluir itens congelados;
+- fila de Embalagem autoritativa, com avanço idempotente do Pedido e snapshot histórico de uma etiqueta por unidade diária e uma etiqueta externa;
+- nome do cliente preservado no Pedido para que a identificação externa não dependa de alterações cadastrais posteriores;
+- tentativas de impressão e reimpressão persistidas com ator, instante, seleção e resultado, sem alterar Pedido ou estoque;
 - health checks de processo e banco;
 - testes unitários das invariantes já implementadas;
 - execução local e imagem de deploy com Docker.
@@ -72,6 +76,10 @@ POST /api/orders/{orderId}/confirmation
 POST /api/orders/{orderId}/status-transitions
 POST /api/orders/{orderId}/rescheduling
 POST /api/orders/{orderId}/cancellation
+GET  /api/operations/production?operationalDate={date}
+GET  /api/operations/packing?operationalDate={date}
+POST /api/operations/packing/{orderId}
+POST /api/operations/packing/{orderId}/print-attempts
 GET  /api/session
 ```
 
@@ -79,9 +87,11 @@ Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token pr
 
 Leituras aceitam qualquer associação ativa. Operações de Pedido e estoque aceitam `Owner`, `Administrator` e `Operator`; `DeliveryDriver` fica restrito a leituras até a integração logística do E13. Configuração de Catálogo, Produção, capacidade, Planos, restrições e Financeiro exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
 
-A entrada de produção, o ajuste/descarte de congelados, a criação/edição do Pedido, a configuração de capacidade, a confirmação e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento e cancelamento também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
+A entrada de produção, o ajuste/descarte de congelados, a criação/edição do Pedido, a configuração de capacidade, a confirmação, a embalagem, o registro de impressão e todas as operações de ciclo exigem `Idempotency-Key`. Edição, configuração, confirmação, transição, reagendamento, cancelamento e embalagem também exigem `ExpectedVersion` e rejeitam alterações concorrentes. Uma repetição só devolve o efeito persistido quando recurso, versão original e conteúdo coincidem; reutilizar a chave para outra intenção gera conflito.
 
-No Pedido, a modalidade vem da Oferta ativa. Itens diários exigem o Item Produzível escolhido e recebem o preço informado para o rascunho; itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa. Na confirmação, a versão mais recente da composição é consolidada no Pedido e validada contra as restrições do cliente. Esses snapshots permanecem estáveis mesmo que a composição mude depois. O `CustomerId` continua sendo uma identidade externa obrigatória até o domínio autoritativo de Clientes do E12.
+No Pedido, a modalidade vem da Oferta ativa. Itens diários exigem o Item Produzível escolhido e recebem o preço informado para o rascunho; itens congelados rejeitam preço enviado pelo cliente e usam o preço da Configuração de Congelado ativa. Na confirmação, a versão mais recente da composição é consolidada no Pedido e validada contra as restrições do cliente. Esses snapshots permanecem estáveis mesmo que a composição mude depois. O `CustomerId` continua sendo uma identidade externa obrigatória até o domínio autoritativo de Clientes do E12; o nome usado na etiqueta já fica preservado no Pedido.
+
+Produção agrega somente os componentes efetivos dos itens de produção diária em Pedidos confirmados ou em estágios posteriores da data consultada. Embalagem aceita Pedidos confirmados, em produção ou em embalagem, avança os estágios necessários numa transação serializável e persiste o snapshot antes de chamar a impressora. A estação envia ZPL 100 × 50 mm por Zebra Browser Print; depois registra na API o sucesso ou a falha. Reimpressões selecionam etiquetas do mesmo snapshot histórico, e a API rejeita identificadores alheios ao Pedido.
 
 O corpo da confirmação pode solicitar créditos por `OrderItemId`, desconto com motivo, taxa de entrega e crédito financeiro. Créditos de plano são consumidos das aquisições compatíveis mais antigas; cada crédito cobre no máximo o benefício contratado e eventuais upgrades continuam no saldo financeiro. Desconto não é pagamento, crédito financeiro não é crédito de plano, e a cobrança registra somente o saldo final positivo.
 
@@ -154,7 +164,7 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 - Cancelamento e reagendamento usam a mesma fronteira transacional serializável da confirmação. Capacidade só é liberada em `Confirmed`; após `InProduction`, o esforço já iniciado permanece reservado.
 - Estornos de plano preservam a aquisição e o item de origem; estornos financeiros são novos movimentos de ledger; cobranças pendentes são canceladas sem apagar o histórico.
 - A trilha `OrderLifecycleEvent` preserva estágio anterior, datas anterior/nova, versão original, motivo, ator, instante, chave idempotente, decisão comercial, destino físico e resumo das reversões.
-- Impressão será um adapter de infraestrutura separado e nunca alterará lote, estoque ou Pedido.
+- Impressão usa um adapter de estação separado e nunca altera lote, estoque ou Pedido; a API persiste somente snapshot e tentativas.
 
 ## Sequência de implementação
 
@@ -168,3 +178,4 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 8. implementar cancelamento, reagendamento e reversões dos efeitos autoritativos — concluído;
 9. integrar a Gestão de Congelados por meio de um adapter HTTP tipado e autenticado — concluído;
 10. integrar os fluxos autoritativos de Pedido e capacidade — concluído.
+11. integrar Produção, Embalagem e o adapter Zebra/ZPL — concluído.

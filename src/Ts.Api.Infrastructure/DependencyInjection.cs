@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Ts.Api.Application.Catalog;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
+using Ts.Api.Application.Operations;
 using Ts.Api.Application.Production;
 using Ts.Api.Infrastructure.Persistence;
 
@@ -32,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<IDailyCapacityManagementStore>(
             provider => provider.GetRequiredService<OrderManagementStore>());
         services.AddScoped<IOrderQueryStore, OrderQueryStore>();
+        services.AddScoped<IOperationsStore, OperationsStore>();
         return services;
     }
 }
