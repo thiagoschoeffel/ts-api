@@ -29,6 +29,7 @@ public sealed class CommerceStore(AppDbContext database, IOrganizationContext or
     public async Task<IReadOnlyList<Payment>> PaymentsAsync(CancellationToken token) => await database.Payments.OrderByDescending(x => x.CreatedAt).ToArrayAsync(token);
     public async Task<IReadOnlyList<PaymentAllocation>> AllocationsAsync(CancellationToken token) => await database.PaymentAllocations.ToArrayAsync(token);
     public async Task<IReadOnlyList<FinancialCreditMovement>> FinancialMovementsAsync(CancellationToken token) => await database.FinancialCreditMovements.OrderByDescending(x => x.OccurredAt).ToArrayAsync(token);
+    public Task<bool> IsActiveDeliveryDriverAsync(Guid id, CancellationToken token) => database.DeliveryDrivers.AnyAsync(x => x.Id == id && x.IsActive, token);
     public void Add(object entity) => database.Add(entity);
     public void RemoveRange(IEnumerable<object> entities) => database.RemoveRange(entities);
     public Task SaveAsync(CancellationToken token) => database.SaveChangesAsync(token);

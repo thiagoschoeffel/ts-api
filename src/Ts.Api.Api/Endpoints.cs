@@ -6,11 +6,13 @@ using Ts.Api.Application.Operations;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
+using Ts.Api.Application.Logistics;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Operations;
+using Ts.Api.Domain.Logistics;
 using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Production;
 using Ts.Api.Infrastructure.Persistence;
@@ -128,9 +130,36 @@ public static class Endpoints
         api.MapPost("/plan-credit-adjustments", AdjustPlanCreditAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("AdjustPlanCredit");
         api.MapPost("/financial-credit-adjustments", AdjustFinancialCreditAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("AdjustFinancialCredit");
         api.MapPost("/payments", RegisterPaymentAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("RegisterPayment");
+        api.MapGet("/logistics", GetLogisticsAsync).WithName("GetLogistics");
+        api.MapPost("/delivery-drivers", CreateDeliveryDriverAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateDeliveryDriver");
+        api.MapPut("/delivery-drivers/{id:guid}", UpdateDeliveryDriverAsync).RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateDeliveryDriver");
+        api.MapPost("/delivery-routes", CreateDeliveryRouteAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("CreateDeliveryRoute");
+        api.MapPut("/delivery-routes/{id:guid}", UpdateDeliveryRouteAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("UpdateDeliveryRoute");
+        api.MapPost("/delivery-routes/{id:guid}/start", StartDeliveryRouteAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("StartDeliveryRoute");
+        api.MapPost("/delivery-routes/{id:guid}/cancellation", CancelDeliveryRouteAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("CancelDeliveryRoute");
+        api.MapPost("/delivery-routes/{routeId:guid}/stops/{stopId:guid}/attempts", RecordDeliveryAttemptAsync).WithName("RecordDeliveryAttempt");
+        api.MapPost("/orders/{orderId:guid}/delivery-rescheduling", RescheduleDeliveryAsync).RequireAuthorization(AuthorizationPolicies.Operate).WithName("RescheduleDelivery");
 
         return endpoints;
     }
+
+    private static async Task<IResult> GetLogisticsAsync(LogisticsService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(token));
+    private static async Task<IResult> CreateDeliveryDriverAsync(DeliveryDriverRequest request, LogisticsService service, CancellationToken token) =>
+        TypedResults.Created("/api/delivery-drivers", await service.SaveDriverAsync(null, new(request.Identification, request.Name, request.Phone, request.IsActive, request.IsAvailable), token));
+    private static async Task<IResult> UpdateDeliveryDriverAsync(Guid id, DeliveryDriverRequest request, LogisticsService service, CancellationToken token) =>
+        TypedResults.Ok(await service.SaveDriverAsync(id, new(request.Identification, request.Name, request.Phone, request.IsActive, request.IsAvailable, request.ExpectedVersion), token));
+    private static async Task<IResult> CreateDeliveryRouteAsync(DeliveryRouteRequest request, LogisticsService service, ICurrentUserContext user, CancellationToken token) =>
+        TypedResults.Created("/api/delivery-routes", await service.CreateRouteAsync(request.Date, request.DeliveryWindow, request.DriverId, request.OrderIds, user.UserId, token));
+    private static async Task<IResult> UpdateDeliveryRouteAsync(Guid id, DeliveryRouteRequest request, LogisticsService service, CancellationToken token) =>
+        TypedResults.Ok(await service.UpdateRouteAsync(id, request.DriverId, request.OrderIds, request.ExpectedVersion ?? 0, token));
+    private static async Task<IResult> StartDeliveryRouteAsync(Guid id, DeliveryRouteVersionRequest request, HttpContext context, LogisticsService service, ICurrentUserContext user, CancellationToken token)
+    { var key = ReadIdempotencyKey(context); return key.Error ?? TypedResults.Ok(await service.StartRouteAsync(id, request.ExpectedVersion, user.UserId, key.Value!, token)); }
+    private static async Task<IResult> CancelDeliveryRouteAsync(Guid id, DeliveryRouteVersionRequest request, LogisticsService service, ICurrentUserContext user, CancellationToken token) =>
+        TypedResults.Ok(await service.CancelRouteAsync(id, request.ExpectedVersion, user.UserId, token));
+    private static async Task<IResult> RecordDeliveryAttemptAsync(Guid routeId, Guid stopId, DeliveryAttemptRequest request, HttpContext context, LogisticsService service, ICurrentUserContext user, CancellationToken token)
+    { var key = ReadIdempotencyKey(context); return key.Error ?? TypedResults.Ok(await service.RecordAttemptAsync(routeId, stopId, request.Result, request.FailureReason, request.Note, request.ReceivedBy, user.UserId, key.Value!, token)); }
+    private static async Task<IResult> RescheduleDeliveryAsync(Guid orderId, DeliveryRescheduleRequest request, HttpContext context, LogisticsService service, ICurrentUserContext user, CancellationToken token)
+    { var key = ReadIdempotencyKey(context); return key.Error ?? TypedResults.Ok(await service.RescheduleAsync(orderId, request.NewDate, request.NewWindow, request.Reason, user.UserId, key.Value!, token)); }
 
     private static async Task<IResult> GetSessionAsync(
         ICurrentUserContext currentUser,
@@ -717,6 +746,11 @@ public sealed record RecordLabelPrintRequest(
     bool IncludeExternalPackageLabel,
     LabelPrintStatus Status,
     string? ErrorMessage = null);
+public sealed record DeliveryDriverRequest(string Identification, string Name, string? Phone, bool IsActive = true, bool IsAvailable = true, long? ExpectedVersion = null);
+public sealed record DeliveryRouteRequest(DateOnly Date, string DeliveryWindow, Guid DriverId, IReadOnlyCollection<Guid> OrderIds, long? ExpectedVersion = null);
+public sealed record DeliveryRouteVersionRequest(long ExpectedVersion);
+public sealed record DeliveryAttemptRequest(DeliveryAttemptResult Result, string? FailureReason = null, string? Note = null, string? ReceivedBy = null);
+public sealed record DeliveryRescheduleRequest(DateOnly NewDate, string NewWindow, string Reason);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 
