@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddScoped<IOrderManagementStore>(provider => provider.GetRequiredService<OrderManagementStore>());
         services.AddScoped<IDailyCapacityManagementStore>(
             provider => provider.GetRequiredService<OrderManagementStore>());
+        services.AddScoped<IOrderQueryStore, OrderQueryStore>();
         return services;
     }
 }

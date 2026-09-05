@@ -563,6 +563,45 @@ public sealed class OrderManagementStore(AppDbContext database) :
     };
 }
 
+public sealed class OrderQueryStore(AppDbContext database) : IOrderQueryStore
+{
+    public async Task<IReadOnlyList<Order>> GetOrdersAsync(CancellationToken cancellationToken) =>
+        await database.Orders.Include("_items")
+            .OrderByDescending(item => item.OperationalDate)
+            .ThenByDescending(item => item.Id)
+            .ToListAsync(cancellationToken);
+
+    public Task<Order?> FindOrderDetailsAsync(Guid orderId, CancellationToken cancellationToken) =>
+        database.Orders
+            .Include("_items")
+            .Include("_frozenAllocations")
+            .Include("_componentSnapshots")
+            .Include("_planCreditAllocations")
+            .Include("_confirmationAudits")
+            .Include("_lifecycleEvents")
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken);
+
+    public async Task<IReadOnlyList<CatalogOffer>> GetActiveOffersAsync(CancellationToken cancellationToken) =>
+        await database.CatalogOffers.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<ProducibleItem>> GetActiveProduciblesAsync(CancellationToken cancellationToken) =>
+        await database.ProducibleItems.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<FrozenConfiguration>> GetActiveFrozenConfigurationsAsync(CancellationToken cancellationToken) =>
+        await database.FrozenConfigurations.Where(item => item.IsActive).OrderBy(item => item.Presentation).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<FrozenLot>> GetSellableFrozenLotsAsync(
+        DateOnly sellableOn,
+        CancellationToken cancellationToken) => await database.FrozenLots
+        .Include("_movements")
+        .Where(item => item.ExpiresOn >= sellableOn)
+        .OrderBy(item => item.ExpiresOn)
+        .ThenBy(item => item.ManufacturedOn)
+        .ThenBy(item => item.Id)
+        .ToListAsync(cancellationToken);
+}
+
 public sealed class OrderConfirmationSetupStore(AppDbContext database) : IOrderConfirmationSetupStore
 {
     public Task<ProducibleItem?> FindProducibleItemAsync(Guid id, CancellationToken cancellationToken) =>

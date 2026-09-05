@@ -61,10 +61,14 @@ public static class Endpoints
         api.MapPost("/orders", CreateOrderAsync)
             .RequireAuthorization(AuthorizationPolicies.Operate)
             .WithName("CreateOrder");
+        api.MapGet("/orders", ListOrdersAsync)
+            .WithName("ListOrders");
+        api.MapGet("/orders/authoring-context", GetOrderAuthoringContextAsync)
+            .WithName("GetOrderAuthoringContext");
         api.MapPut("/orders/{orderId:guid}", EditOrderAsync)
             .RequireAuthorization(AuthorizationPolicies.Operate)
             .WithName("EditOrder");
-        api.MapGet("/orders/{orderId:guid}", GetOrderAsync)
+        api.MapGet("/orders/{orderId:guid}", GetOrderDetailsAsync)
             .WithName("GetOrder");
         api.MapPut("/daily-capacities/{operationalDate}", ConfigureDailyCapacityAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
@@ -351,9 +355,20 @@ public static class Endpoints
         return TypedResults.Ok(result);
     }
 
-    private static async Task<IResult> GetOrderAsync(
+    private static async Task<IResult> ListOrdersAsync(
+        ListOrdersHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(cancellationToken));
+
+    private static async Task<IResult> GetOrderAuthoringContextAsync(
+        DateOnly? operationalDate,
+        GetOrderAuthoringContextHandler handler,
+        CancellationToken cancellationToken) =>
+        TypedResults.Ok(await handler.HandleAsync(operationalDate ?? DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken));
+
+    private static async Task<IResult> GetOrderDetailsAsync(
         Guid orderId,
-        GetOrderHandler handler,
+        GetOrderDetailsHandler handler,
         CancellationToken cancellationToken) =>
         TypedResults.Ok(await handler.HandleAsync(orderId, cancellationToken));
 

@@ -35,6 +35,7 @@ Esta primeira fatia estabelece:
 - auditoria imutável das condições e efeitos comerciais da confirmação;
 - auditoria transacional de ações críticas com ator confiável, tenant, instante e correlação;
 - matriz explícita de transições operacionais do Pedido, com versão otimista, idempotência e trilha histórica;
+- projeções autenticadas para lista, detalhe com efeitos históricos e contexto autoritativo de montagem do Pedido;
 - reagendamento atômico de Pedido confirmado, transferindo a reserva somente quando a nova data possui capacidade;
 - cancelamento com liberação de capacidade apenas antes da produção, estorno dos créditos nas aquisições de origem, devolução do crédito financeiro e cancelamento de cobranças pendentes;
 - destinação rastreável de congelados cancelados: retorno ao mesmo lote antes da separação, conferência humana completa após separação e quarentena/descarte depois da expedição;
@@ -59,6 +60,8 @@ GET  /api/frozen-stock/lots/{lotId}
 POST /api/frozen-stock/production-entries
 POST /api/frozen-stock/lots/{lotId}/movements
 POST /api/orders
+GET  /api/orders
+GET  /api/orders/authoring-context?operationalDate={date}
 PUT  /api/orders/{orderId}
 GET  /api/orders/{orderId}
 PUT  /api/daily-capacities/{operationalDate}
@@ -162,4 +165,4 @@ Nunca limpe nem remova o volume `postgres-data` para validar migrations. O banco
 7. incorporar créditos de plano, crédito financeiro, composição e restrições à transação de confirmação — concluído;
 8. implementar cancelamento, reagendamento e reversões dos efeitos autoritativos — concluído;
 9. integrar a Gestão de Congelados por meio de um adapter HTTP tipado e autenticado — concluído;
-10. integrar os fluxos autoritativos de Pedido e capacidade.
+10. integrar os fluxos autoritativos de Pedido e capacidade — concluído.
