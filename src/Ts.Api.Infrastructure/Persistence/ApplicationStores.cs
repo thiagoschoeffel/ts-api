@@ -79,6 +79,11 @@ public sealed class FrozenProductionStore(AppDbContext database) : IFrozenProduc
             item => item.Id == id && item.IsActive,
             cancellationToken);
 
+    public Task<ProducibleItem?> FindProducibleItemAsync(
+        Guid id,
+        CancellationToken cancellationToken) => database.ProducibleItems
+        .SingleOrDefaultAsync(item => item.Id == id && item.IsActive, cancellationToken);
+
     public Task<FrozenLot?> FindByIdempotencyKeyAsync(
         string idempotencyKey,
         CancellationToken cancellationToken) =>
@@ -108,6 +113,106 @@ public sealed class FrozenProductionStore(AppDbContext database) : IFrozenProduc
             return existing;
         }
     }
+}
+
+public sealed class FrozenStockManagementStore(AppDbContext database) : IFrozenStockManagementStore
+{
+    public async Task<IReadOnlyList<CatalogOffer>> GetActiveFrozenOffersAsync(
+        CancellationToken cancellationToken) => await database.CatalogOffers
+        .Where(item => item.IsActive && item.FulfillmentMode == OfferFulfillmentMode.FrozenStock)
+        .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<ProducibleItem>> GetProduciblesAsync(
+        CancellationToken cancellationToken) => await database.ProducibleItems
+        .OrderBy(item => item.Name)
+        .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<FrozenConfiguration>> GetConfigurationsAsync(
+        CancellationToken cancellationToken) => await database.FrozenConfigurations
+        .OrderBy(item => item.Presentation)
+        .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<FrozenLot>> GetLotsAsync(
+        CancellationToken cancellationToken) => await database.FrozenLots
+        .Include("_movements")
+        .AsSplitQuery()
+        .ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyDictionary<Guid, string>> GetUserNamesAsync(
+        IReadOnlyCollection<Guid> userIds,
+        CancellationToken cancellationToken) => await database.Users
+        .Where(item => userIds.Contains(item.Id))
+        .ToDictionaryAsync(item => item.Id, item => item.DisplayName, cancellationToken);
+
+    public Task<FrozenConfiguration?> FindConfigurationAsync(
+        Guid id,
+        CancellationToken cancellationToken) => database.FrozenConfigurations
+        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+    public Task<FrozenLot?> FindLotAsync(
+        Guid id,
+        CancellationToken cancellationToken) => database.FrozenLots
+        .Include("_movements")
+        .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+    public Task<FrozenStockMovement?> FindMovementByIdempotencyKeyAsync(
+        string idempotencyKey,
+        CancellationToken cancellationToken) => database.FrozenStockMovements
+        .SingleOrDefaultAsync(item => item.IdempotencyKey == idempotencyKey, cancellationToken);
+
+    public async Task<T> ExecuteSerializableAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                var result = await operation(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception) when (IsRetryable(exception))
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                database.ChangeTracker.Clear();
+                if (attempt == maximumAttempts)
+                {
+                    throw new ConflictException(
+                        "A movimentação conflitou com outra operação. Recarregue o lote e tente novamente.");
+                }
+            }
+        }
+
+        throw new InvalidOperationException("O registro da movimentação terminou sem resultado.");
+    }
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        foreach (var entry in database.ChangeTracker.Entries<FrozenStockMovement>()
+                     .Where(entry => entry.State == EntityState.Modified
+                         && entry.Entity.IdempotencyKey is not null))
+        {
+            entry.State = EntityState.Added;
+        }
+
+        return database.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool IsRetryable(Exception exception) => exception switch
+    {
+        DbUpdateConcurrencyException => true,
+        DbUpdateException { InnerException: PostgresException postgres }
+            when postgres.SqlState is PostgresErrorCodes.SerializationFailure
+                or PostgresErrorCodes.DeadlockDetected
+                or PostgresErrorCodes.UniqueViolation => true,
+        PostgresException postgres when postgres.SqlState is PostgresErrorCodes.SerializationFailure
+            or PostgresErrorCodes.DeadlockDetected => true,
+        _ => false,
+    };
 }
 
 public sealed class OrderConfirmationStore(AppDbContext database) : IOrderConfirmationStore

@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddScoped<IProducibleItemStore, ProducibleItemStore>();
         services.AddScoped<IFrozenConfigurationStore, FrozenConfigurationStore>();
         services.AddScoped<IFrozenProductionStore, FrozenProductionStore>();
+        services.AddScoped<IFrozenStockManagementStore, FrozenStockManagementStore>();
         services.AddScoped<IOrderConfirmationStore, OrderConfirmationStore>();
         services.AddScoped<IOrderLifecycleStore, OrderLifecycleStore>();
         services.AddScoped<IOrderConfirmationSetupStore, OrderConfirmationSetupStore>();

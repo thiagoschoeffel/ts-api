@@ -181,6 +181,8 @@ public sealed class AppDbContext : DbContext
             configuration.Ignore(item => item.Balance);
             configuration.Ignore(item => item.Movements);
             configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.ProducibleNameSnapshot).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.PresentationSnapshot).HasMaxLength(120).IsRequired();
             configuration.HasOne<FrozenConfiguration>()
                 .WithMany()
                 .HasForeignKey(item => new { item.OrganizationId, item.FrozenConfigurationId })
@@ -213,8 +215,10 @@ public sealed class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.Property(item => item.Origin).HasMaxLength(80).IsRequired();
             configuration.Property(item => item.Reason).HasMaxLength(500);
+            configuration.Property(item => item.IdempotencyKey).HasMaxLength(200);
             configuration.Ignore(item => item.SignedQuantity);
             configuration.HasIndex(item => new { item.OrganizationId, item.FrozenLotId, item.OccurredAt });
+            configuration.HasIndex(item => new { item.OrganizationId, item.IdempotencyKey }).IsUnique();
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 
