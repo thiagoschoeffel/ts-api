@@ -16,6 +16,24 @@ public sealed record WhatsAppInboundEvent(string PhoneNumberId, string BusinessP
     string CustomerPhone, string? CustomerName, string Content, DateTimeOffset PlatformTimestamp, bool SentByBusinessApp = false);
 public sealed record WhatsAppStatusEvent(string PhoneNumberId, string ExternalId, string Status, string? FailureReason);
 public sealed record WhatsAppSendResult(string ExternalId, DateTimeOffset AcceptedAt);
+public enum WhatsAppSendOutcome { Rejected, Unknown }
+public sealed class WhatsAppProviderException(
+    WhatsAppSendOutcome outcome,
+    string message,
+    int? httpStatus = null,
+    int? providerCode = null,
+    int? providerSubcode = null,
+    string? traceId = null,
+    bool? isTransient = null,
+    Exception? innerException = null) : Exception(message, innerException)
+{
+    public WhatsAppSendOutcome Outcome { get; } = outcome;
+    public int? HttpStatus { get; } = httpStatus;
+    public int? ProviderCode { get; } = providerCode;
+    public int? ProviderSubcode { get; } = providerSubcode;
+    public string? TraceId { get; } = traceId;
+    public bool? IsTransient { get; } = isTransient;
+}
 
 public interface IAttendanceStore
 {
@@ -87,15 +105,14 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
                 await store.NextSequenceAsync(id, ct), content.Trim(), timeProvider.GetUtcNow(), MessageOrigin.Operator);
             store.Add(reserved); await store.SaveChangesAsync(ct); return reserved;
         }, token);
-        try
-        {
-            var sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone, content.Trim(), token);
-            message.MarkSent(sent.ExternalId, sent.AcceptedAt); conversation.RecordOutbound(sent.AcceptedAt); await store.SaveChangesAsync(token);
-        }
+        WhatsAppSendResult sent;
+        try { sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone, content.Trim(), token); }
+        catch (WhatsAppProviderException exception) when (exception.Outcome == WhatsAppSendOutcome.Rejected)
+        { message.MarkFailed(exception.Message); quota.Release(); await store.SaveChangesAsync(CancellationToken.None); throw; }
         catch (Exception exception)
-        {
-            message.MarkFailed(exception.Message); quota.Release(); await store.SaveChangesAsync(CancellationToken.None); throw;
-        }
+        { message.MarkOutcomeUnknown(UnknownOutcomeReason(exception)); await store.SaveChangesAsync(CancellationToken.None); throw; }
+        message.MarkSent(sent.ExternalId, sent.AcceptedAt); conversation.RecordOutbound(sent.AcceptedAt);
+        await store.SaveChangesAsync(token);
         return await Result(conversation, token);
     }
 
@@ -106,8 +123,14 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
         var conversation = await store.FindConversationAsync(conversationId, token) ?? throw new ResourceNotFoundException("Conversa não encontrada.");
         var quota = await GetOrCreateQuota(conversation.BusinessPhoneNumberId, conversation.BusinessPhoneNumber, token);
         quota.Reserve(message.Origin == MessageOrigin.Automation); message.MarkProcessing(); await store.SaveChangesAsync(token);
-        try { var sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone, message.Content, token); message.MarkSent(sent.ExternalId, sent.AcceptedAt); conversation.RecordOutbound(sent.AcceptedAt); await store.SaveChangesAsync(token); }
-        catch (Exception exception) { message.MarkFailed(exception.Message); quota.Release(); await store.SaveChangesAsync(CancellationToken.None); throw; }
+        WhatsAppSendResult sent;
+        try { sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone, message.Content, token); }
+        catch (WhatsAppProviderException exception) when (exception.Outcome == WhatsAppSendOutcome.Rejected)
+        { message.MarkFailed(exception.Message); quota.Release(); await store.SaveChangesAsync(CancellationToken.None); throw; }
+        catch (Exception exception)
+        { message.MarkOutcomeUnknown(UnknownOutcomeReason(exception)); await store.SaveChangesAsync(CancellationToken.None); throw; }
+        message.MarkSent(sent.ExternalId, sent.AcceptedAt); conversation.RecordOutbound(sent.AcceptedAt);
+        await store.SaveChangesAsync(token);
         return await Result(conversation, token);
     }
 
@@ -160,6 +183,9 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
         if (quota is null) { quota = WhatsAppQuotaPeriod.Create(organization.OrganizationId, phoneId, phone, period, configuration.FreeServiceMessageLimit, configuration.AutomationPauseAt); store.Add(quota); await store.SaveChangesAsync(token); }
         return quota;
     }
+    private static string UnknownOutcomeReason(Exception exception) => exception is WhatsAppProviderException provider
+        ? provider.Message
+        : "O provedor não confirmou se a mensagem foi aceita. A reserva foi mantida para reconciliação.";
     private async Task<AttendanceConversationResult> Result(WhatsAppConversation c, CancellationToken token) => Map(c, await store.GetMessagesAsync([c.Id], token), null);
     private static AttendanceConversationResult Map(WhatsAppConversation c, IReadOnlyCollection<WhatsAppMessage> messages, string? assigned) => new(c.Id, c.CustomerId, c.CustomerName, c.CustomerPhone, c.Mode, assigned, c.UnreadCount, c.LastMessageAt, c.OrderId, c.Version, messages.OrderBy(x => x.Sequence).Select(m => new AttendanceMessageResult(m.Id, m.ExternalId, m.Direction, m.Origin, m.Content, m.PlatformTimestamp, m.ReceivedTimestamp, m.ProcessingStatus, m.DeliveryStatus, m.FailureReason)).ToArray());
     private static WhatsAppQuotaResult Map(WhatsAppQuotaPeriod q) { var used = q.Delivered + q.Reserved; var status = used >= q.FreeLimit ? "automation-blocked" : used >= q.AutomationPauseAt ? "automation-blocked" : used >= q.FreeLimit * .9 ? "critical" : used >= q.FreeLimit * .75 ? "alert" : used >= q.FreeLimit * .5 ? "attention" : "normal"; return new(q.BusinessPhoneNumber, q.PeriodStart, q.FreeLimit, q.AutomationPauseAt, q.Delivered, q.Reserved, q.PeriodStart.AddMonths(1), status); }

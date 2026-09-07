@@ -25,6 +25,12 @@ public sealed class HttpRequestContext : IOrganizationContext, ICurrentUserConte
         CorrelationId = correlationId;
     }
 
+    public void SetUser(Guid resolvedUserId, string correlationId)
+    {
+        userId = resolvedUserId;
+        CorrelationId = correlationId;
+    }
+
     public void SetWebhookOrganization(Guid resolvedOrganizationId, string correlationId)
     {
         organizationId = resolvedOrganizationId;
@@ -66,6 +72,13 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
         if (platformUser is null)
         {
             await Forbid(httpContext, "O usuário autenticado não está cadastrado na plataforma.");
+            return;
+        }
+
+        requestContext.SetUser(platformUser.Id, correlationId);
+        if (httpContext.Request.Path.Equals("/api/session", StringComparison.OrdinalIgnoreCase))
+        {
+            await next(httpContext);
             return;
         }
 

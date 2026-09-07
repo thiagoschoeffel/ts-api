@@ -46,6 +46,18 @@ public sealed class OrganizationContextMiddlewareTests
         Assert.False(string.IsNullOrWhiteSpace(fixture.RequestContext.CorrelationId));
     }
 
+    [Fact]
+    public async Task Session_discovery_resolves_the_user_without_requiring_an_organization()
+    {
+        var fixture = await Fixture.CreateAsync(withMembership: false);
+
+        await fixture.InvokeAsync(authenticated: true, organizationId: null, path: "/api/session");
+
+        Assert.True(fixture.NextWasCalled);
+        Assert.Equal(fixture.UserId, fixture.RequestContext.UserId);
+        Assert.Throws<InvalidOperationException>(() => fixture.RequestContext.OrganizationId);
+    }
+
     private sealed class Fixture
     {
         private readonly AppDbContext database;
@@ -93,15 +105,16 @@ public sealed class OrganizationContextMiddlewareTests
                 organization.Id, user.Id, user.ExternalSubject);
         }
 
-        public async Task InvokeAsync(bool authenticated, Guid organizationId)
+        public async Task InvokeAsync(bool authenticated, Guid? organizationId, string path = "/api/orders")
         {
-            HttpContext.Request.Path = "/api/orders";
+            HttpContext.Request.Path = path;
             HttpContext.Response.Body = new MemoryStream();
             HttpContext.RequestServices = new ServiceCollection()
                 .AddLogging()
                 .AddProblemDetails()
                 .BuildServiceProvider();
-            HttpContext.Request.Headers["X-Organization-Id"] = organizationId.ToString();
+            if (organizationId.HasValue)
+                HttpContext.Request.Headers["X-Organization-Id"] = organizationId.Value.ToString();
             if (authenticated)
             {
                 HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
