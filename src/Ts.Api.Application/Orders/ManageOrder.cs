@@ -18,6 +18,7 @@ public interface IOrderManagementStore
     Task<Order?> FindByModificationKeyAsync(string idempotencyKey, CancellationToken cancellationToken);
     Task<Order?> FindOrderAsync(Guid orderId, CancellationToken cancellationToken);
     Task<Customer?> FindActiveCustomerAsync(Guid customerId, CancellationToken cancellationToken) => Task.FromResult<Customer?>(null);
+    Task<IReadOnlyList<CustomerAddress>> GetCustomerAddressesAsync(Guid customerId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<CustomerAddress>>([]);
     Task<bool> EnforcesCustomersAsync(CancellationToken cancellationToken) => Task.FromResult(false);
     Task<CatalogOffer?> FindActiveOfferAsync(Guid offerId, CancellationToken cancellationToken);
     Task<FrozenConfiguration?> FindActiveFrozenConfigurationAsync(
@@ -64,7 +65,8 @@ public sealed class CreateOrderHandler(
                     command.CustomerId,
                     command.OperationalDate,
                     command.Items,
-                    command.CustomerName))
+                    command.CustomerName,
+                    command.Fulfillment))
             {
                 throw new ConflictException("A chave de idempotência já foi usada com outro conteúdo de pedido.");
             }
@@ -77,16 +79,46 @@ public sealed class CreateOrderHandler(
             throw new DomainException("O cliente informado não existe ou está inativo.");
 
         var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
+        var fulfillment = await ResolveFulfillmentAsync(store, customer, command.CustomerId, command.CustomerName, command.Fulfillment, cancellationToken);
         var order = Order.CreateDraft(
             organizationContext.OrganizationId,
             command.CustomerId,
             command.OperationalDate,
             definitions,
             idempotencyKey,
-            customer?.Name ?? command.CustomerName);
+            customer?.Name ?? command.CustomerName,
+            fulfillment);
         await store.AddAsync(order, cancellationToken);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
+    }
+
+    internal static async Task<OrderFulfillmentSnapshotDefinition?> ResolveFulfillmentAsync(
+        IOrderManagementStore store, Customer? customer, Guid customerId, string? customerName,
+        OrderFulfillmentInput? input, CancellationToken cancellationToken)
+    {
+        if (input is null)
+        {
+            if (await store.EnforcesCustomersAsync(cancellationToken))
+                throw new DomainException("Informe se o pedido será entregue ou retirado e preserve o contato utilizado.");
+            return null;
+        }
+        CustomerAddress? address = null;
+        if (input.Type == OrderFulfillmentType.Delivery)
+        {
+            if (input.AddressId is not Guid addressId)
+                throw new DomainException("Selecione um endereço para entrega.");
+            address = (await store.GetCustomerAddressesAsync(customerId, cancellationToken))
+                .SingleOrDefault(item => item.Id == addressId)
+                ?? throw new DomainException("O endereço selecionado não pertence ao cliente.");
+        }
+
+        return new OrderFulfillmentSnapshotDefinition(
+            input.Type, customer?.Name ?? customerName ?? string.Empty,
+            string.IsNullOrWhiteSpace(input.Phone) ? customer?.Phone ?? string.Empty : input.Phone,
+            address?.Label, address?.Street, address?.Number, address?.Complement,
+            address?.Neighborhood, address?.City, address?.State, address?.PostalCode,
+            address?.ReferencePoint, input.DeliveryWindow);
     }
 
     internal static string ValidateIdempotencyKey(string value)
@@ -125,7 +157,8 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
                     command.CustomerId,
                     command.OperationalDate,
                     command.Items,
-                    command.CustomerName))
+                    command.CustomerName,
+                    command.Fulfillment))
             {
                 throw new ConflictException(
                     "A chave de idempotência já foi usada para outro pedido ou conteúdo.");
@@ -151,8 +184,9 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
             throw new DomainException("O cliente informado não existe ou está inativo.");
 
         var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
+        var fulfillment = await CreateOrderHandler.ResolveFulfillmentAsync(store, customer, command.CustomerId, command.CustomerName, command.Fulfillment, cancellationToken);
         var previousItems = order.Items.ToArray();
-        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, customer?.Name ?? command.CustomerName);
+        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, customer?.Name ?? command.CustomerName, fulfillment);
         store.ReplaceItems(previousItems, order.Items);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
@@ -278,12 +312,14 @@ internal static class OrderResultMapper
         Guid customerId,
         DateOnly operationalDate,
         IReadOnlyCollection<OrderItemInput> inputs,
-        string? customerName = null)
+        string? customerName = null,
+        OrderFulfillmentInput? fulfillment = null)
     {
         if (order.CustomerId != customerId
             || order.OperationalDate != operationalDate
             || customerName is not null && order.CustomerNameSnapshot != customerName.Trim()
-            || order.Items.Count != inputs.Count)
+            || order.Items.Count != inputs.Count
+            || !MatchesFulfillment(order, fulfillment))
         {
             return false;
         }
@@ -298,6 +334,16 @@ internal static class OrderResultMapper
             && (pair.First.FulfillmentMode == OfferFulfillmentMode.FrozenStock
                 ? pair.Second.UnitPrice is null
                 : pair.First.UnitPrice == pair.Second.UnitPrice));
+    }
+
+    private static bool MatchesFulfillment(Order order, OrderFulfillmentInput? input)
+    {
+        if (input is null) return order.FulfillmentType is null;
+        var phone = new string(input.Phone.Where(char.IsDigit).ToArray());
+        return order.FulfillmentType == input.Type
+            && order.FulfillmentPhone == phone
+            && (input.Type == OrderFulfillmentType.Pickup
+                || order.DeliveryWindow == input.DeliveryWindow?.Trim());
     }
 
     public static IReadOnlyCollection<OrderItemResult> MapItems(Order order) => order.Items.Select(item => new OrderItemResult(
@@ -321,5 +367,14 @@ internal static class OrderResultMapper
         order.Version,
         order.DailyCapacityUnits,
         order.TotalAmount,
-        MapItems(order));
+        MapItems(order),
+        new OrderFulfillmentResult(
+            order.FulfillmentType, order.FulfillmentContactName, order.FulfillmentPhone,
+            order.FulfillmentAddressLabel, order.FulfillmentStreet, order.FulfillmentNumber,
+            order.FulfillmentComplement, order.FulfillmentNeighborhood, order.FulfillmentCity,
+            order.FulfillmentState, order.FulfillmentPostalCode, order.FulfillmentReference,
+            order.DeliveryWindow, order.FulfillmentFrozenAt,
+            order.FulfillmentType == OrderFulfillmentType.Pickup
+            || order.FulfillmentType == OrderFulfillmentType.Delivery
+               && order.FulfillmentStreet is not null && order.DeliveryWindow is not null));
 }

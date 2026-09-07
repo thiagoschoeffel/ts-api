@@ -33,6 +33,13 @@ public sealed class OrganizationMembership : ITenantOwned
 
         return new OrganizationMembership(organizationId, userId, role);
     }
+
+    public void Update(OrganizationRole role, bool isActive)
+    {
+        if (!Enum.IsDefined(role)) throw new DomainException("O papel do usuário na organização é inválido.");
+        Role = role;
+        IsActive = isActive;
+    }
 }
 
 public enum OrganizationRole

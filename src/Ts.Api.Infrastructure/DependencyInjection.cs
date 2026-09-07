@@ -6,6 +6,7 @@ using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Operations;
+using Ts.Api.Application.Organizations;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
 using Ts.Api.Application.Logistics;
@@ -41,6 +42,7 @@ public static class DependencyInjection
             provider => provider.GetRequiredService<OrderManagementStore>());
         services.AddScoped<IOrderQueryStore, OrderQueryStore>();
         services.AddScoped<IOperationsStore, OperationsStore>();
+        services.AddScoped<IMembershipStore, MembershipStore>();
         services.AddScoped<ICommerceStore, CommerceStore>();
         services.AddScoped<ILogisticsStore, LogisticsStore>();
         services.AddScoped<IAttendanceStore, AttendanceStore>();

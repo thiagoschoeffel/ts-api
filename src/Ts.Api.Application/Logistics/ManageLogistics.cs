@@ -46,15 +46,16 @@ public sealed class LogisticsService(ILogisticsStore store, IOrganizationContext
     {
         var drivers = await store.GetDriversAsync(token); var orders = await store.GetDeliveryOrdersAsync(token);
         var customers = await store.GetCustomersAsync(orders.Select(x => x.CustomerId).Distinct().ToArray(), token);
-        var addresses = await store.GetAddressesAsync(customers.Select(x => x.Id).ToArray(), token);
         var packings = await store.GetPackingsAsync(orders.Select(x => x.Id).ToArray(), token);
         var routes = await store.GetRoutesAsync(token); var attempts = await store.GetAttemptsAsync(routes.SelectMany(x => x.Stops).Select(x => x.Id).ToArray(), token);
         var reschedules = await store.GetReschedulesAsync(token);
         var assigned = routes.Where(x => x.Status is DeliveryRouteStatus.Planned or DeliveryRouteStatus.InProgress).SelectMany(x => x.Stops).Select(x => x.OrderId).ToHashSet();
         var packingIds = packings.Select(x => x.OrderId).ToHashSet(); var customerById = customers.ToDictionary(x => x.Id);
         var latestReschedule = reschedules.GroupBy(x => x.OrderId).ToDictionary(x => x.Key, x => x.OrderByDescending(y => y.OccurredAt).First());
-        var available = orders.Where(x => !assigned.Contains(x.Id) && (x.Status == OrderStatus.InPacking && packingIds.Contains(x.Id) || x.Status == OrderStatus.DeliveryFailed && latestReschedule.ContainsKey(x.Id)))
-            .Select(order => MapAvailable(order, customerById.GetValueOrDefault(order.CustomerId), addresses, latestReschedule.GetValueOrDefault(order.Id))).ToArray();
+        var available = orders.Where(x => x.FulfillmentType == OrderFulfillmentType.Delivery
+                && HasCompleteDeliverySnapshot(x) && !assigned.Contains(x.Id)
+                && (x.Status == OrderStatus.InPacking && packingIds.Contains(x.Id) || x.Status == OrderStatus.DeliveryFailed && latestReschedule.ContainsKey(x.Id)))
+            .Select(order => MapAvailable(order, customerById.GetValueOrDefault(order.CustomerId), latestReschedule.GetValueOrDefault(order.Id))).ToArray();
         return new(drivers.Select(MapDriver).ToArray(), available, routes.Select(route => MapRoute(route, attempts)).ToArray(),
             reschedules.Select(x => new DeliveryRescheduleResult(x.Id, x.OrderId, x.PreviousDate, x.PreviousWindow, x.NewDate, x.NewWindow, x.Reason, x.OccurredAt)).ToArray());
     }
@@ -149,14 +150,23 @@ public sealed class LogisticsService(ILogisticsStore store, IOrganizationContext
         var routes = await store.GetRoutesAsync(token); var assigned = routes.Where(x => x.Id != currentRouteId && x.Status is DeliveryRouteStatus.Planned or DeliveryRouteStatus.InProgress).SelectMany(x => x.Stops).Select(x => x.OrderId).ToHashSet();
         if (selected.Any(x => assigned.Contains(x.Id) || x.Status == OrderStatus.InPacking && (!packed.Contains(x.Id) || x.OperationalDate != date) || x.Status != OrderStatus.InPacking && x.Status != OrderStatus.DeliveryFailed)) throw new ConflictException("Um ou mais pedidos não estão aptos para esta rota.");
         if (selected.Any(x => x.Status == OrderStatus.DeliveryFailed && !reschedules.Any(r => r.OrderId == x.Id && r.NewDate == date && r.NewWindow == window))) throw new ConflictException("A nova tentativa deve respeitar o reagendamento registrado.");
-        var customers = await store.GetCustomersAsync(selected.Select(x => x.CustomerId).Distinct().ToArray(), token); var byId = customers.ToDictionary(x => x.Id); var addresses = await store.GetAddressesAsync(customers.Select(x => x.Id).ToArray(), token);
-        return ids.Select(id => { var order = selected.Single(x => x.Id == id); var customer = byId.GetValueOrDefault(order.CustomerId); var address = addresses.FirstOrDefault(x => x.CustomerId == order.CustomerId);
-            return new DeliveryStopSnapshot(order.Id, order.CustomerNameSnapshot, customer?.Phone, AddressText(address)); }).ToArray();
+        if (selected.Any(order => order.FulfillmentType != OrderFulfillmentType.Delivery || !HasCompleteDeliverySnapshot(order)))
+            throw new ConflictException("Um ou mais pedidos não possuem snapshot histórico completo de entrega.");
+        return ids.Select(id => { var order = selected.Single(x => x.Id == id);
+            return new DeliveryStopSnapshot(order.Id, order.FulfillmentContactName ?? order.CustomerNameSnapshot,
+                order.FulfillmentPhone, AddressText(order)); }).ToArray();
     }
-    private static DeliveryOrderResult MapAvailable(Order o, Customer? c, IReadOnlyCollection<CustomerAddress> addresses, DeliveryReschedule? r) => new(o.Id, o.Version, o.Status,
-        r?.NewDate ?? o.OperationalDate, r?.NewWindow ?? "11:00–12:00", o.CustomerNameSnapshot, c?.Phone, AddressText(addresses.FirstOrDefault(x => x.CustomerId == o.CustomerId)), ParseDriver(c?.PreferredDeliveryDriverId));
+    private static DeliveryOrderResult MapAvailable(Order o, Customer? c, DeliveryReschedule? r) => new(o.Id, o.Version, o.Status,
+        r?.NewDate ?? o.OperationalDate, r?.NewWindow ?? o.DeliveryWindow!, o.FulfillmentContactName ?? o.CustomerNameSnapshot,
+        o.FulfillmentPhone, AddressText(o), ParseDriver(c?.PreferredDeliveryDriverId));
     private static Guid? ParseDriver(string? value) => Guid.TryParse(value, out var id) ? id : null;
-    private static string AddressText(CustomerAddress? a) => a is null ? "Endereço não informado" : string.Join(", ", new[] { a.Street, a.Number, a.Complement, a.Neighborhood, a.City, a.State }.Where(x => !string.IsNullOrWhiteSpace(x)));
+    private static bool HasCompleteDeliverySnapshot(Order order) => order.FulfillmentPhone is not null
+        && order.FulfillmentStreet is not null && order.DeliveryWindow is not null;
+    private static string AddressText(Order order) => string.Join(", ", new[] {
+        order.FulfillmentStreet, order.FulfillmentNumber, order.FulfillmentComplement,
+        order.FulfillmentNeighborhood, order.FulfillmentCity, order.FulfillmentState,
+        order.FulfillmentPostalCode, order.FulfillmentReference
+    }.Where(value => !string.IsNullOrWhiteSpace(value)));
     private static DeliveryDriverResult MapDriver(DeliveryDriver x) => new(x.Id, x.Identification, x.Name, x.Phone, x.IsActive, x.IsAvailable, x.Version);
     private static DeliveryRouteResult MapRoute(DeliveryRoute x, IReadOnlyCollection<DeliveryAttempt> all) { var attempts = all.Where(a => x.Stops.Any(s => s.Id == a.RouteStopId)).ToArray(); return new(x.Id, x.Date, x.DeliveryWindow, x.DriverId, x.DriverNameSnapshot, x.Status, x.Version, x.CreatedAt, x.StartedAt, x.CompletedAt, x.CancelledAt,
         x.Stops.OrderBy(s => s.Position).Select(s => new DeliveryStopResult(s.Id, s.OrderId, s.Position, s.CustomerNameSnapshot, s.CustomerPhoneSnapshot, s.AddressSnapshot, attempts.SingleOrDefault(a => a.RouteStopId == s.Id)?.Result)).ToArray(), attempts.Select(MapAttempt).ToArray()); }

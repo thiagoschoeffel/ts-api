@@ -57,7 +57,8 @@ public sealed record OrderDetailsResult(
     decimal TotalAmount,
     IReadOnlyCollection<OrderItemResult> Items,
     OrderConfirmationEffectsResult? Confirmation,
-    IReadOnlyCollection<OrderLifecycleEventResult> Lifecycle);
+    IReadOnlyCollection<OrderLifecycleEventResult> Lifecycle,
+    OrderFulfillmentResult Fulfillment);
 
 public sealed record OrderAuthoringOfferResult(
     Guid Id,
@@ -67,7 +68,11 @@ public sealed record OrderAuthoringOfferResult(
     bool RequiresMenuChoice = false);
 
 public sealed record OrderAuthoringProducibleResult(Guid Id, string Name);
-public sealed record OrderAuthoringCustomerResult(Guid Id, string Name, string Phone);
+public sealed record OrderAuthoringAddressResult(
+    Guid Id, string Label, string Street, string? Number, string? Complement,
+    string? Neighborhood, string? City, string? State, string? PostalCode, string? Reference);
+public sealed record OrderAuthoringCustomerResult(
+    Guid Id, string Name, string Phone, IReadOnlyCollection<OrderAuthoringAddressResult> Addresses);
 public sealed record OrderAuthoringMenuOptionResult(Guid Id, string Category, Guid ProducibleItemId,
     string ProducibleItemName, MenuAvailability Availability);
 
@@ -94,6 +99,7 @@ public interface IOrderQueryStore
     Task<Order?> FindOrderDetailsAsync(Guid orderId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogOffer>> GetActiveOffersAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<Customer>> GetActiveCustomersAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<Customer>>([]);
+    Task<IReadOnlyList<CustomerAddress>> GetCustomerAddressesAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<CustomerAddress>>([]);
     Task<IReadOnlyList<ProducibleItem>> GetActiveProduciblesAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<FrozenConfiguration>> GetActiveFrozenConfigurationsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<FrozenLot>> GetSellableFrozenLotsAsync(DateOnly sellableOn, CancellationToken cancellationToken);
@@ -139,7 +145,8 @@ public sealed class GetOrderDetailsHandler(IOrderQueryStore store)
                     item.Id, item.Type, item.PreviousStatus, item.NewStatus,
                     item.PreviousOperationalDate, item.NewOperationalDate, item.Reason, item.OccurredAt,
                     item.CommercialDisposition, item.FrozenDisposition, item.CapacityUnitsReleased,
-                    item.PlanCreditsReversed, item.FinancialCreditReversed, item.ChargesCancelled)).ToArray());
+                    item.PlanCreditsReversed, item.FinancialCreditReversed, item.ChargesCancelled)).ToArray(),
+            OrderResultMapper.Map(order).Fulfillment);
     }
 }
 
@@ -149,6 +156,7 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
     {
         var offers = await store.GetActiveOffersAsync(cancellationToken);
         var customers = await store.GetActiveCustomersAsync(cancellationToken);
+        var addresses = await store.GetCustomerAddressesAsync(cancellationToken);
         var producibles = await store.GetActiveProduciblesAsync(cancellationToken);
         var configurations = await store.GetActiveFrozenConfigurationsAsync(cancellationToken);
         var lots = await store.GetSellableFrozenLotsAsync(sellableOn, cancellationToken);
@@ -160,7 +168,11 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
             : offers.Where(x => x.FulfillmentMode == OfferFulfillmentMode.FrozenStock || (dailyOffers?.ContainsKey(x.Id) ?? false)).ToArray();
 
         return new OrderAuthoringContextResult(
-            customers.Select(item => new OrderAuthoringCustomerResult(item.Id, item.Name, item.Phone)).ToArray(),
+            customers.Select(item => new OrderAuthoringCustomerResult(item.Id, item.Name, item.Phone,
+                addresses.Where(address => address.CustomerId == item.Id).Select(address => new OrderAuthoringAddressResult(
+                    address.Id, address.Label, address.Street, address.Number, address.Complement,
+                    address.Neighborhood, address.City, address.State, address.PostalCode,
+                    address.ReferencePoint)).ToArray())).ToArray(),
             visibleOffers.Select(item => new OrderAuthoringOfferResult(item.Id, item.Name, item.FulfillmentMode,
                 dailyOffers?.GetValueOrDefault(item.Id)?.EffectivePrice, item.RequiresMenuChoice)).ToArray(),
             producibles.Select(item => new OrderAuthoringProducibleResult(item.Id, item.Name)).ToArray(),
