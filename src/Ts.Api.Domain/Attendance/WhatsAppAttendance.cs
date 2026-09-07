@@ -5,7 +5,7 @@ namespace Ts.Api.Domain.Attendance;
 public enum AttendanceMode { Automated, Human, Closed }
 public enum MessageDirection { Inbound, Outbound }
 public enum MessageOrigin { Customer, Automation, Operator }
-public enum MessageProcessingStatus { Received, Processing, Processed, Failed, Ignored }
+public enum MessageProcessingStatus { Received, Processing, Processed, Failed, Ignored, OutcomeUnknown }
 public enum MessageDeliveryStatus { NotApplicable, Reserved, Sent, Delivered, Failed }
 
 public sealed class WhatsAppConversation : ITenantOwned
@@ -82,6 +82,7 @@ public sealed class WhatsAppMessage : ITenantOwned
     public void MarkSent(string externalId, DateTimeOffset at) { ExternalId = externalId; PlatformTimestamp = at; ProcessingStatus = MessageProcessingStatus.Processed; DeliveryStatus = MessageDeliveryStatus.Sent; FailureReason = null; }
     public void MarkDelivered() { DeliveryStatus = MessageDeliveryStatus.Delivered; }
     public void MarkFailed(string reason) { ProcessingStatus = MessageProcessingStatus.Failed; DeliveryStatus = MessageDeliveryStatus.Failed; FailureReason = reason; }
+    public void MarkOutcomeUnknown(string reason) { ProcessingStatus = MessageProcessingStatus.OutcomeUnknown; DeliveryStatus = MessageDeliveryStatus.Reserved; FailureReason = reason; }
 }
 
 public sealed class WhatsAppQuotaPeriod : ITenantOwned

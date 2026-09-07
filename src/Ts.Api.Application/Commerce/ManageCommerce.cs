@@ -41,7 +41,8 @@ public sealed record AcquisitionResult(Guid Id, Guid CustomerId, string Customer
 public sealed record PlanMovementResult(Guid Id, Guid AcquisitionId, PlanCreditMovementType Type,
     int Quantity, int SignedQuantity, Guid? OrderId, Guid? OrderItemId, Guid? ActorId, DateTimeOffset OccurredAt);
 public sealed record ChargeResult(Guid Id, Guid CustomerId, string CustomerNameSnapshot, Guid OrderId,
-    decimal Amount, decimal AllocatedAmount, decimal Balance, DateOnly DueOn, DateTimeOffset CreatedAt, OrderChargeStatus Status);
+    decimal Amount, decimal AllocatedAmount, decimal Balance, DateOnly DueOn, DateTimeOffset CreatedAt,
+    DateTimeOffset? CancelledAt, OrderChargeStatus Status);
 public sealed record PaymentResult(Guid Id, Guid CustomerId, string CustomerNameSnapshot, decimal Amount,
     decimal AllocatedAmount, decimal FinancialCreditGenerated, DateOnly ReceivedOn, PaymentMethod Method,
     string? Reference, DateTimeOffset CreatedAt);
@@ -106,7 +107,7 @@ public sealed class CommerceService(ICommerceStore store, IOrganizationContext o
                 x.EligibleOfferId, x.Movements.Where(m => m.Type == PlanCreditMovementType.Acquired).Sum(m => m.Quantity), x.Balance, x.PaidAmount, x.BenefitAmountPerCredit, x.AcquiredOn, x.ExpiresOn, x.CreatedAt)).ToArray(),
             acquisitions.SelectMany(x => x.Movements).Select(x => new PlanMovementResult(x.Id, x.AcquisitionId, x.Type, x.Quantity, x.SignedQuantity, x.OrderId, x.OrderItemId, x.ActorId, x.OccurredAt)).ToArray(),
             charges.Select(x => { var allocated = allocationByCharge.GetValueOrDefault(x.Id); var order = ordersById[x.OrderId]; return new ChargeResult(x.Id, order.CustomerId,
-                order.CustomerNameSnapshot, x.OrderId, x.Amount, allocated, Math.Max(0, x.Amount - allocated), x.DueOn, x.CreatedAt, x.Status); }).ToArray(),
+                order.CustomerNameSnapshot, x.OrderId, x.Amount, allocated, Math.Max(0, x.Amount - allocated), x.DueOn, x.CreatedAt, x.CancelledAt, x.Status); }).ToArray(),
             payments.Select(x => { var allocated = allocationByPayment.GetValueOrDefault(x.Id); return new PaymentResult(x.Id, x.CustomerId, x.CustomerNameSnapshot, x.Amount, allocated, x.Amount - allocated, x.ReceivedOn, x.Method, x.Reference, x.CreatedAt); }).ToArray(),
             allocations.Select(x => new AllocationResult(x.Id, x.PaymentId, x.ChargeId, x.Amount)).ToArray(),
             financial.Select(x => new FinancialMovementResult(x.Id, x.CustomerId, x.Type, x.Amount, x.SignedAmount, x.Reason, x.OrderId, x.PaymentId, x.ActorId, x.OccurredAt)).ToArray());

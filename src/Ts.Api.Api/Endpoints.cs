@@ -19,6 +19,7 @@ using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Production;
 using Ts.Api.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Ts.Api.Api;
 
@@ -26,10 +27,11 @@ public static class Endpoints
 {
     public static IEndpointRouteBuilder MapApplicationEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        var api = endpoints.MapGroup("/api").RequireAuthorization(AuthorizationPolicies.Read);
-
-        api.MapGet("/session", GetSessionAsync)
+        endpoints.MapGet("/api/session", GetSessionAsync)
+            .RequireAuthorization()
             .WithName("GetSession");
+
+        var api = endpoints.MapGroup("/api").RequireAuthorization(AuthorizationPolicies.Read);
         api.MapGet("/memberships", (MembershipService service, CancellationToken token) => service.GetAsync(token))
             .RequireAuthorization(AuthorizationPolicies.Administer).WithName("GetMemberships");
         api.MapPost("/memberships", CreateMembershipAsync)
@@ -181,7 +183,7 @@ public static class Endpoints
 
     private static async Task<IResult> GetSessionAsync(
         ICurrentUserContext currentUser,
-        IOrganizationContext organizationContext,
+        HttpContext httpContext,
         AppDbContext database,
         CancellationToken cancellationToken)
     {
@@ -194,12 +196,29 @@ public static class Endpoints
                 organization => organization.Id,
                 (membership, organization) => new { Membership = membership, Organization = organization })
             .OrderBy(item => item.Organization.Name)
-            .Select(item => new SessionOrganization(
-                item.Organization.Id, item.Organization.Name, item.Organization.Slug, item.Membership.Role,
-                item.Organization.Id == organizationContext.OrganizationId))
+            .Select(item => new
+            {
+                item.Organization.Id,
+                item.Organization.Name,
+                item.Organization.Slug,
+                item.Membership.Role
+            })
             .ToArrayAsync(cancellationToken);
+
+        var requestedHeader = httpContext.Request.Headers["X-Organization-Id"].FirstOrDefault();
+        var requestedValue = requestedHeader ?? httpContext.User.FindFirstValue("organization_id");
+        var requestedId = Guid.TryParse(requestedValue, out var parsed) ? parsed : (Guid?)null;
+        if (requestedHeader is not null && (!requestedId.HasValue || memberships.All(item => item.Id != requestedId)))
+            return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "Acesso à organização negado",
+                detail: "O usuário não possui associação ativa com a organização solicitada.");
+        var activeOrganizationId = memberships.Any(item => item.Id == requestedId)
+            ? requestedId
+            : memberships.Select(item => (Guid?)item.Id).FirstOrDefault();
+        var organizations = memberships.Select(item => new SessionOrganization(
+            item.Id, item.Name, item.Slug, item.Role, item.Id == activeOrganizationId)).ToArray();
         return TypedResults.Ok(new SessionResponse(user.Id, user.DisplayName,
-            organizationContext.OrganizationId, memberships));
+            activeOrganizationId, organizations));
     }
 
     private static async Task<IResult> CreateOfferAsync(
@@ -802,5 +821,5 @@ public sealed record GrantFinancialCreditRequest(Guid CustomerId, decimal Amount
 public sealed record SessionOrganization(
     Guid Id, string Name, string Slug, OrganizationRole Role, bool IsActive);
 public sealed record SessionResponse(
-    Guid UserId, string DisplayName, Guid ActiveOrganizationId,
+    Guid UserId, string DisplayName, Guid? ActiveOrganizationId,
     IReadOnlyCollection<SessionOrganization> Organizations);
