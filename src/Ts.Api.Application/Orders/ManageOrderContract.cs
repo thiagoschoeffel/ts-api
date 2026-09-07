@@ -15,7 +15,8 @@ public sealed record CreateOrderCommand(
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemInput> Items,
     string IdempotencyKey,
-    string? CustomerName = null);
+    string? CustomerName = null,
+    OrderFulfillmentInput? Fulfillment = null);
 
 public sealed record EditOrderCommand(
     Guid OrderId,
@@ -24,7 +25,31 @@ public sealed record EditOrderCommand(
     IReadOnlyCollection<OrderItemInput> Items,
     long ExpectedVersion,
     string IdempotencyKey,
-    string? CustomerName = null);
+    string? CustomerName = null,
+    OrderFulfillmentInput? Fulfillment = null);
+
+public sealed record OrderFulfillmentInput(
+    OrderFulfillmentType Type,
+    string Phone,
+    Guid? AddressId = null,
+    string? DeliveryWindow = null);
+
+public sealed record OrderFulfillmentResult(
+    OrderFulfillmentType? Type,
+    string? ContactName,
+    string? Phone,
+    string? AddressLabel,
+    string? Street,
+    string? Number,
+    string? Complement,
+    string? Neighborhood,
+    string? City,
+    string? State,
+    string? PostalCode,
+    string? Reference,
+    string? DeliveryWindow,
+    DateTimeOffset? FrozenAt,
+    bool IsComplete);
 
 public sealed record OrderResult(
     Guid Id,
@@ -34,7 +59,8 @@ public sealed record OrderResult(
     long Version,
     int DailyCapacityUnits,
     decimal TotalAmount,
-    IReadOnlyCollection<OrderItemResult> Items);
+    IReadOnlyCollection<OrderItemResult> Items,
+    OrderFulfillmentResult Fulfillment);
 
 public sealed record OrderItemResult(
     Guid Id,

@@ -33,6 +33,20 @@ public sealed class Order : ITenantOwned
     public Guid OrganizationId { get; private set; }
     public Guid CustomerId { get; private set; }
     public string CustomerNameSnapshot { get; private set; } = string.Empty;
+    public OrderFulfillmentType? FulfillmentType { get; private set; }
+    public string? FulfillmentContactName { get; private set; }
+    public string? FulfillmentPhone { get; private set; }
+    public string? FulfillmentAddressLabel { get; private set; }
+    public string? FulfillmentStreet { get; private set; }
+    public string? FulfillmentNumber { get; private set; }
+    public string? FulfillmentComplement { get; private set; }
+    public string? FulfillmentNeighborhood { get; private set; }
+    public string? FulfillmentCity { get; private set; }
+    public string? FulfillmentState { get; private set; }
+    public string? FulfillmentPostalCode { get; private set; }
+    public string? FulfillmentReference { get; private set; }
+    public string? DeliveryWindow { get; private set; }
+    public DateTimeOffset? FulfillmentFrozenAt { get; private set; }
     public DateOnly OperationalDate { get; private set; }
     public OrderStatus Status { get; private set; }
     public long Version { get; private set; }
@@ -59,7 +73,8 @@ public sealed class Order : ITenantOwned
         DateOnly operationalDate,
         IReadOnlyCollection<OrderItemDefinition> items,
         string? creationIdempotencyKey = null,
-        string? customerNameSnapshot = null)
+        string? customerNameSnapshot = null,
+        OrderFulfillmentSnapshotDefinition? fulfillment = null)
     {
         if (organizationId == Guid.Empty)
         {
@@ -81,6 +96,7 @@ public sealed class Order : ITenantOwned
             : NormalizeIdempotencyKey(creationIdempotencyKey);
         var order = new Order(organizationId, customerId, operationalDate, normalizedKey);
         order.CustomerNameSnapshot = NormalizeCustomerName(customerId, customerNameSnapshot);
+        order.ApplyFulfillment(fulfillment);
         order.ReplaceItems(items);
 
         return order;
@@ -91,7 +107,8 @@ public sealed class Order : ITenantOwned
         DateOnly operationalDate,
         IReadOnlyCollection<OrderItemDefinition> items,
         string idempotencyKey,
-        string? customerNameSnapshot = null)
+        string? customerNameSnapshot = null,
+        OrderFulfillmentSnapshotDefinition? fulfillment = null)
     {
         if (Status != OrderStatus.Open)
         {
@@ -110,6 +127,7 @@ public sealed class Order : ITenantOwned
 
         CustomerId = customerId;
         CustomerNameSnapshot = NormalizeCustomerName(customerId, customerNameSnapshot);
+        ApplyFulfillment(fulfillment);
         OperationalDate = operationalDate;
         ReplaceItems(items);
         LastModificationIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
@@ -240,6 +258,7 @@ public sealed class Order : ITenantOwned
         Status = OrderStatus.Confirmed;
         ConfirmedBy = actorId;
         ConfirmedAt = confirmedAt;
+        FulfillmentFrozenAt = confirmedAt;
         ConfirmationIdempotencyKey = normalizedKey;
         Version++;
     }
@@ -253,7 +272,8 @@ public sealed class Order : ITenantOwned
     {
         var allowed = Status switch
         {
-            OrderStatus.Confirmed => newStatus == OrderStatus.InProduction,
+            OrderStatus.Confirmed => newStatus == OrderStatus.InProduction && DailyCapacityUnits > 0
+                || newStatus == OrderStatus.InPacking && DailyCapacityUnits == 0,
             OrderStatus.InProduction => newStatus == OrderStatus.InPacking,
             OrderStatus.InPacking => newStatus == OrderStatus.InDelivery,
             OrderStatus.InDelivery => newStatus is OrderStatus.Completed or OrderStatus.DeliveryFailed,
@@ -381,6 +401,55 @@ public sealed class Order : ITenantOwned
             : normalized;
     }
 
+    private void ApplyFulfillment(OrderFulfillmentSnapshotDefinition? value)
+    {
+        if (value is null)
+        {
+            FulfillmentType = null;
+            FulfillmentContactName = null;
+            FulfillmentPhone = null;
+            FulfillmentAddressLabel = null;
+            FulfillmentStreet = null;
+            FulfillmentNumber = null;
+            FulfillmentComplement = null;
+            FulfillmentNeighborhood = null;
+            FulfillmentCity = null;
+            FulfillmentState = null;
+            FulfillmentPostalCode = null;
+            FulfillmentReference = null;
+            DeliveryWindow = null;
+            return;
+        }
+
+        var phone = new string((value.Phone ?? string.Empty).Where(char.IsDigit).ToArray());
+        if (phone.Length is < 10 or > 15)
+            throw new DomainException("Informe um telefone de contato válido com DDD.");
+        if (value.Type == OrderFulfillmentType.Delivery
+            && (string.IsNullOrWhiteSpace(value.Street) || string.IsNullOrWhiteSpace(value.DeliveryWindow)))
+            throw new DomainException("Endereço e janela são obrigatórios para entrega.");
+
+        FulfillmentType = value.Type;
+        FulfillmentContactName = Optional(value.ContactName, 160) ?? CustomerNameSnapshot;
+        FulfillmentPhone = phone;
+        FulfillmentAddressLabel = value.Type == OrderFulfillmentType.Delivery ? Optional(value.AddressLabel, 100) : null;
+        FulfillmentStreet = value.Type == OrderFulfillmentType.Delivery ? Optional(value.Street, 200) : null;
+        FulfillmentNumber = value.Type == OrderFulfillmentType.Delivery ? Optional(value.Number, 40) : null;
+        FulfillmentComplement = value.Type == OrderFulfillmentType.Delivery ? Optional(value.Complement, 160) : null;
+        FulfillmentNeighborhood = value.Type == OrderFulfillmentType.Delivery ? Optional(value.Neighborhood, 120) : null;
+        FulfillmentCity = value.Type == OrderFulfillmentType.Delivery ? Optional(value.City, 120) : null;
+        FulfillmentState = value.Type == OrderFulfillmentType.Delivery ? Optional(value.State, 40) : null;
+        FulfillmentPostalCode = value.Type == OrderFulfillmentType.Delivery ? Optional(value.PostalCode, 20) : null;
+        FulfillmentReference = value.Type == OrderFulfillmentType.Delivery ? Optional(value.Reference, 300) : null;
+        DeliveryWindow = value.Type == OrderFulfillmentType.Delivery ? Optional(value.DeliveryWindow, 80) : null;
+    }
+
+    private static string? Optional(string? value, int maximum)
+    {
+        var normalized = value?.Trim();
+        if (normalized?.Length > maximum) throw new DomainException($"O valor deve possuir até {maximum} caracteres.");
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
     private static string NormalizeIdempotencyKey(string idempotencyKey)
     {
         var normalized = idempotencyKey?.Trim() ?? string.Empty;
@@ -464,3 +533,18 @@ public sealed record OrderItemDefinition(
     string OfferName = "",
     string? ProducibleItemName = null,
     string? FrozenPresentation = null);
+
+public sealed record OrderFulfillmentSnapshotDefinition(
+    OrderFulfillmentType Type,
+    string ContactName,
+    string Phone,
+    string? AddressLabel = null,
+    string? Street = null,
+    string? Number = null,
+    string? Complement = null,
+    string? Neighborhood = null,
+    string? City = null,
+    string? State = null,
+    string? PostalCode = null,
+    string? Reference = null,
+    string? DeliveryWindow = null);

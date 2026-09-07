@@ -3,6 +3,7 @@ using Ts.Api.Application.Common;
 using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
+using Ts.Api.Application.Organizations;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Production;
 using Ts.Api.Application.Commerce;
@@ -29,6 +30,12 @@ public static class Endpoints
 
         api.MapGet("/session", GetSessionAsync)
             .WithName("GetSession");
+        api.MapGet("/memberships", (MembershipService service, CancellationToken token) => service.GetAsync(token))
+            .RequireAuthorization(AuthorizationPolicies.Administer).WithName("GetMemberships");
+        api.MapPost("/memberships", CreateMembershipAsync)
+            .RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateMembership");
+        api.MapPut("/memberships/{userId:guid}", UpdateMembershipAsync)
+            .RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateMembership");
 
         api.MapPost("/catalog/offers", CreateOfferAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer)
@@ -149,6 +156,10 @@ public static class Endpoints
     }
 
     private static async Task<IResult> GetLogisticsAsync(LogisticsService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(token));
+    private static async Task<IResult> CreateMembershipAsync(MembershipRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
+        TypedResults.Created("/api/memberships", await service.SaveAsync(null, request.ExternalSubject, request.Role, request.IsActive, context.CorrelationId, token));
+    private static async Task<IResult> UpdateMembershipAsync(Guid userId, MembershipRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
+        TypedResults.Ok(await service.SaveAsync(userId, request.ExternalSubject, request.Role, request.IsActive, context.CorrelationId, token));
     private static async Task<IResult> SendAttendanceMessageAsync(Guid id, AttendanceMessageRequest request, HttpContext context, AttendanceService service, CancellationToken token)
     { var key = ReadIdempotencyKey(context); return key.Error ?? TypedResults.Ok(await service.SendAsync(id, request.Content, key.Value!, token)); }
     private static async Task<IResult> CreateDeliveryDriverAsync(DeliveryDriverRequest request, LogisticsService service, CancellationToken token) =>
@@ -448,7 +459,10 @@ public static class Endpoints
                 request.OperationalDate,
                 request.Items.Select(MapOrderItem).ToArray(),
                 idempotencyKeyResult.Value!,
-                request.CustomerName),
+                request.CustomerName,
+                request.Fulfillment is null ? null : new OrderFulfillmentInput(
+                    request.Fulfillment.Type, request.Fulfillment.Phone,
+                    request.Fulfillment.AddressId, request.Fulfillment.DeliveryWindow)),
             cancellationToken);
         return TypedResults.Created($"/api/orders/{result.Id}", result);
     }
@@ -474,7 +488,10 @@ public static class Endpoints
                 request.Items.Select(MapOrderItem).ToArray(),
                 request.ExpectedVersion,
                 idempotencyKeyResult.Value!,
-                request.CustomerName),
+                request.CustomerName,
+                request.Fulfillment is null ? null : new OrderFulfillmentInput(
+                    request.Fulfillment.Type, request.Fulfillment.Phone,
+                    request.Fulfillment.AddressId, request.Fulfillment.DeliveryWindow)),
             cancellationToken);
         return TypedResults.Ok(result);
     }
@@ -733,14 +750,22 @@ public sealed record CreateOrderRequest(
     Guid CustomerId,
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemRequest> Items,
-    string? CustomerName = null);
+    string? CustomerName = null,
+    OrderFulfillmentRequest? Fulfillment = null);
 
 public sealed record EditOrderRequest(
     Guid CustomerId,
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemRequest> Items,
     long ExpectedVersion,
-    string? CustomerName = null);
+    string? CustomerName = null,
+    OrderFulfillmentRequest? Fulfillment = null);
+
+public sealed record OrderFulfillmentRequest(
+    OrderFulfillmentType Type,
+    string Phone,
+    Guid? AddressId = null,
+    string? DeliveryWindow = null);
 
 public sealed record OrderItemRequest(
     Guid OfferId,
@@ -761,6 +786,7 @@ public sealed record DeliveryRouteRequest(DateOnly Date, string DeliveryWindow, 
 public sealed record DeliveryRouteVersionRequest(long ExpectedVersion);
 public sealed record DeliveryAttemptRequest(DeliveryAttemptResult Result, string? FailureReason = null, string? Note = null, string? ReceivedBy = null);
 public sealed record DeliveryRescheduleRequest(DateOnly NewDate, string NewWindow, string Reason);
+public sealed record MembershipRequest(string ExternalSubject, OrganizationRole Role, bool IsActive = true);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 

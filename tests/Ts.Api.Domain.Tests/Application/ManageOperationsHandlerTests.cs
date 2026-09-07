@@ -40,6 +40,8 @@ public sealed class ManageOperationsHandlerTests
         Assert.Equal(2, result.Labels!.DailyItemLabels.Count);
         Assert.Single(result.Labels.PreLabeledFrozenItemIds);
         Assert.Equal("Maria Silva", result.Labels.ExternalPackageLabel.CustomerName);
+        Assert.Equal("11999999999", result.Labels.ExternalPackageLabel.Phone);
+        Assert.Contains(result.Labels.ExternalPackageLabel.AddressLines, line => line.Contains("Rua das Flores"));
         Assert.NotNull(result.PackedAt);
 
         var repeated = await new PackOrderHandler(store, TimeProvider.System).HandleAsync(
@@ -70,6 +72,31 @@ public sealed class ManageOperationsHandlerTests
         Assert.Single(store.Attempts);
     }
 
+    [Fact]
+    public async Task Pack_FrozenOnlyOrderSkipsSyntheticProductionEvent()
+    {
+        var frozenOffer = CatalogOffer.Create(OrganizationId, "Congelados", OfferFulfillmentMode.FrozenStock);
+        var frozen = ProducibleItem.Create(OrganizationId, "Sopa");
+        var configuration = FrozenConfiguration.Create(
+            OrganizationId, frozenOffer.Id, frozen.Id, "400 ml", 400, MeasurementUnit.Milliliter, 24m);
+        var order = Order.CreateDraft(OrganizationId, Guid.NewGuid(), OperationalDate,
+            [new OrderItemDefinition(frozenOffer.Id, frozenOffer.FulfillmentMode, 1, 24m,
+                configuration.Id, frozen.Id, frozenOffer.Name, frozen.Name, configuration.Presentation)],
+            customerNameSnapshot: "Maria Silva",
+            fulfillment: new OrderFulfillmentSnapshotDefinition(OrderFulfillmentType.Pickup, "Maria Silva", "11999999999"));
+        order.AllocateFrozenStock(order.Items.Single(), Guid.NewGuid(), 1);
+        order.Confirm(ActorId, DateTimeOffset.UtcNow, "confirm-frozen-only");
+
+        Assert.Throws<Ts.Api.Domain.Common.DomainException>(() => order.TransitionStatus(
+            OrderStatus.InProduction, "Produção", ActorId, DateTimeOffset.UtcNow, "synthetic-production"));
+
+        await new PackOrderHandler(new OperationsStoreFake { Orders = [order] }, TimeProvider.System).HandleAsync(
+            new PackOrderCommand(order.Id, order.Version, ActorId, "pack-frozen-only"), CancellationToken.None);
+
+        Assert.Equal(OrderStatus.InPacking, order.Status);
+        Assert.DoesNotContain(order.LifecycleEvents, item => item.NewStatus == OrderStatus.InProduction);
+    }
+
     private static Order CreateConfirmedMixedOrder()
     {
         var dailyOffer = CatalogOffer.Create(OrganizationId, "Prato do dia", OfferFulfillmentMode.DailyProduction);
@@ -84,12 +111,16 @@ public sealed class ManageOperationsHandlerTests
                 ProducibleItemId: daily.Id, OfferName: dailyOffer.Name, ProducibleItemName: daily.Name),
             new OrderItemDefinition(frozenOffer.Id, frozenOffer.FulfillmentMode, 1, 24m,
                 configuration.Id, frozen.Id, frozenOffer.Name, frozen.Name, configuration.Presentation),
-        ], customerNameSnapshot: "Maria Silva");
+        ], customerNameSnapshot: "Maria Silva", fulfillment: new OrderFulfillmentSnapshotDefinition(
+            OrderFulfillmentType.Delivery, "Maria Silva", "11999999999", "Casa", "Rua das Flores",
+            "123", Neighborhood: "Centro", City: "São Paulo", State: "SP", PostalCode: "01001000",
+            DeliveryWindow: "11:00–12:00"));
         var dailyItem = order.Items.Single(item => item.FulfillmentMode == OfferFulfillmentMode.DailyProduction);
         var frozenItem = order.Items.Single(item => item.FulfillmentMode == OfferFulfillmentMode.FrozenStock);
         order.SnapshotComponent(dailyItem, Guid.NewGuid(), 1, "Arroz", 100, "g", string.Empty);
         order.AllocateFrozenStock(frozenItem, Guid.NewGuid(), 1);
         order.Confirm(ActorId, DateTimeOffset.UtcNow, $"confirm-{Guid.NewGuid():N}");
+        order.TransitionStatus(OrderStatus.InProduction, "Produção iniciada", ActorId, DateTimeOffset.UtcNow, $"production-{Guid.NewGuid():N}");
         return order;
     }
 

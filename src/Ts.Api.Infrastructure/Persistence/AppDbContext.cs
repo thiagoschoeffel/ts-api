@@ -435,6 +435,18 @@ public sealed class AppDbContext : DbContext
         {
             configuration.ToTable("orders");
             configuration.Property(item => item.CustomerNameSnapshot).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.FulfillmentContactName).HasMaxLength(160);
+            configuration.Property(item => item.FulfillmentPhone).HasMaxLength(30);
+            configuration.Property(item => item.FulfillmentAddressLabel).HasMaxLength(100);
+            configuration.Property(item => item.FulfillmentStreet).HasMaxLength(200);
+            configuration.Property(item => item.FulfillmentNumber).HasMaxLength(40);
+            configuration.Property(item => item.FulfillmentComplement).HasMaxLength(160);
+            configuration.Property(item => item.FulfillmentNeighborhood).HasMaxLength(120);
+            configuration.Property(item => item.FulfillmentCity).HasMaxLength(120);
+            configuration.Property(item => item.FulfillmentState).HasMaxLength(40);
+            configuration.Property(item => item.FulfillmentPostalCode).HasMaxLength(20);
+            configuration.Property(item => item.FulfillmentReference).HasMaxLength(300);
+            configuration.Property(item => item.DeliveryWindow).HasMaxLength(80);
             configuration.HasKey(item => item.Id);
             configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
             configuration.HasOne<Organization>()

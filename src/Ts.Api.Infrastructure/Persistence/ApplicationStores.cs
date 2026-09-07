@@ -7,6 +7,7 @@ using Ts.Api.Application.FrozenStock;
 using Ts.Api.Application.Menus;
 using Ts.Api.Application.Orders;
 using Ts.Api.Application.Operations;
+using Ts.Api.Application.Organizations;
 using Ts.Api.Application.Production;
 using Ts.Api.Domain.Catalog;
 using Ts.Api.Domain.Customers;
@@ -15,10 +16,30 @@ using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Menus;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Operations;
+using Ts.Api.Domain.Organizations;
 using Ts.Api.Domain.Plans;
 using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
+
+public sealed class MembershipStore(AppDbContext database) : IMembershipStore
+{
+    public async Task<IReadOnlyList<(OrganizationMembership Membership, PlatformUser User)>> GetAsync(CancellationToken token)
+    {
+        var memberships = await database.OrganizationMemberships.ToListAsync(token);
+        var userIds = memberships.Select(item => item.UserId).ToArray();
+        var users = await database.Users.Where(item => userIds.Contains(item.Id)).ToListAsync(token);
+        return memberships.Join(users, membership => membership.UserId, user => user.Id,
+            (membership, user) => (membership, user)).OrderBy(item => item.user.DisplayName).ToArray();
+    }
+    public Task<PlatformUser?> FindUserBySubjectAsync(string subject, CancellationToken token) =>
+        database.Users.SingleOrDefaultAsync(user => user.ExternalSubject == subject && user.IsActive, token);
+    public Task<OrganizationMembership?> FindAsync(Guid userId, CancellationToken token) =>
+        database.OrganizationMemberships.SingleOrDefaultAsync(item => item.UserId == userId, token);
+    public void Add(OrganizationMembership membership) => database.OrganizationMemberships.Add(membership);
+    public void Add(AuditEvent auditEvent) => database.AuditEvents.Add(auditEvent);
+    public Task SaveChangesAsync(CancellationToken token) => database.SaveChangesAsync(token);
+}
 
 public sealed class OperationsStore(AppDbContext database) : IOperationsStore
 {
@@ -616,6 +637,8 @@ public sealed class OrderManagementStore(AppDbContext database) :
 
     public Task<Customer?> FindActiveCustomerAsync(Guid customerId, CancellationToken cancellationToken) =>
         database.Customers.SingleOrDefaultAsync(item => item.Id == customerId && item.IsActive, cancellationToken);
+    public async Task<IReadOnlyList<CustomerAddress>> GetCustomerAddressesAsync(Guid customerId, CancellationToken cancellationToken) =>
+        await database.CustomerAddresses.Where(item => item.CustomerId == customerId).ToListAsync(cancellationToken);
     public Task<bool> EnforcesCustomersAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
     public Task<CatalogOffer?> FindActiveOfferAsync(
@@ -716,6 +739,9 @@ public sealed class OrderQueryStore(AppDbContext database) : IOrderQueryStore
 
     public async Task<IReadOnlyList<Customer>> GetActiveCustomersAsync(CancellationToken cancellationToken) =>
         await database.Customers.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);
+
+    public async Task<IReadOnlyList<CustomerAddress>> GetCustomerAddressesAsync(CancellationToken cancellationToken) =>
+        await database.CustomerAddresses.OrderBy(item => item.Label).ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<ProducibleItem>> GetActiveProduciblesAsync(CancellationToken cancellationToken) =>
         await database.ProducibleItems.Where(item => item.IsActive).OrderBy(item => item.Name).ToListAsync(cancellationToken);

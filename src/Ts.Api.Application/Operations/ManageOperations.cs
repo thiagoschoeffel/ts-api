@@ -132,7 +132,7 @@ public sealed class GetPackingQueueHandler(IOperationsStore store)
                 item.Id, item.AttemptedAt, users.GetValueOrDefault(item.AttemptedBy, "Operador"),
                 JsonSerializer.Deserialize<PackingLabelSelection>(item.SelectionJson)!, item.Status, item.ErrorMessage)).ToArray();
         return new PackingOrderResult(
-            order.Id, order.Version, order.CustomerNameSnapshot, null, null,
+            order.Id, order.Version, order.CustomerNameSnapshot, order.FulfillmentPhone, order.DeliveryWindow,
             items, packing?.PackedAt, packing is null ? null : users.GetValueOrDefault(packing.PackedBy, "Operador"),
             labels, printAttempts);
     }
@@ -159,8 +159,10 @@ public sealed class PackOrderHandler(IOperationsStore store, TimeProvider timePr
                 ?? throw new ResourceNotFoundException("Pedido não encontrado.");
             if (order.Version != command.ExpectedVersion) throw new ConflictException("O pedido foi alterado. Recarregue a fila e tente novamente.");
             var now = timeProvider.GetUtcNow();
-            if (order.Status == OrderStatus.Confirmed)
-                order.TransitionStatus(OrderStatus.InProduction, "Produção operacional iniciada", command.ActorId, now, $"{command.IdempotencyKey}:production");
+            if (order.Status == OrderStatus.Confirmed && order.DailyCapacityUnits == 0)
+                order.TransitionStatus(OrderStatus.InPacking, "Pedido de estoque congelado conferido e embalado", command.ActorId, now, $"{command.IdempotencyKey}:packing");
+            else if (order.Status == OrderStatus.Confirmed)
+                throw new ConflictException("A produção diária precisa ser iniciada antes da embalagem.");
             if (order.Status == OrderStatus.InProduction)
                 order.TransitionStatus(OrderStatus.InPacking, "Pedido conferido e embalado", command.ActorId, now, $"{command.IdempotencyKey}:packing");
             if (order.Status != OrderStatus.InPacking) throw new ConflictException("O pedido não está elegível para embalagem.");
@@ -183,7 +185,7 @@ public sealed class PackOrderHandler(IOperationsStore store, TimeProvider timePr
             item.Id, item.ProducibleItemName ?? item.OfferName, item.FrozenPresentation, item.Quantity,
             item.FulfillmentMode == OfferFulfillmentMode.FrozenStock, [], [])).ToArray();
         return new PackingOrderResult(order.Id, order.Version,
-            labels.ExternalPackageLabel.CustomerName, labels.ExternalPackageLabel.Phone, null, items,
+            labels.ExternalPackageLabel.CustomerName, labels.ExternalPackageLabel.Phone, order.DeliveryWindow, items,
             packing.PackedAt, users.GetValueOrDefault(packing.PackedBy, "Operador"), labels, []);
     }
 
@@ -204,8 +206,20 @@ public sealed class PackOrderHandler(IOperationsStore store, TimeProvider timePr
             dailyLabels,
             order.Items.Where(item => item.FulfillmentMode == OfferFulfillmentMode.FrozenStock).Select(item => item.Id).ToArray(),
             new ExternalPackageLabelSnapshot(
-                $"pedido-{order.Id:N}-pacote", order.Id, customerName, null, [],
+                $"pedido-{order.Id:N}-pacote", order.Id, customerName, order.FulfillmentPhone,
+                AddressLines(order),
                 order.Items.Select(item => $"{item.Quantity}× {item.ProducibleItemName ?? item.OfferName}").ToArray()));
+    }
+
+    private static IReadOnlyCollection<string> AddressLines(Order order)
+    {
+        if (order.FulfillmentType != OrderFulfillmentType.Delivery) return [];
+        return new[]
+        {
+            string.Join(", ", new[] { order.FulfillmentStreet, order.FulfillmentNumber, order.FulfillmentComplement }.Where(value => !string.IsNullOrWhiteSpace(value))),
+            string.Join(" · ", new[] { order.FulfillmentNeighborhood, order.FulfillmentCity, order.FulfillmentState, order.FulfillmentPostalCode }.Where(value => !string.IsNullOrWhiteSpace(value))),
+            order.FulfillmentReference is null ? null : $"Referência: {order.FulfillmentReference}",
+        }.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!).ToArray();
     }
 }
 
