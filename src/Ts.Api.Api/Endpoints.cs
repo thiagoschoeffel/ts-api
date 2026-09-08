@@ -65,6 +65,21 @@ public static class Endpoints
                     pageSize == 0 ? 20 : pageSize, token))
             .RequireAuthorization(AuthorizationPolicies.PlatformAuditRead)
             .WithName("GetPlatformAuditEvents");
+        platform.MapGet("/onboardings", (PlatformOnboardingStatus? status, int page, int pageSize,
+                PlatformOnboardingService service, CancellationToken token) =>
+                service.ListAsync(status, page == 0 ? 1 : page, pageSize == 0 ? 20 : pageSize, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformOnboarding)
+            .WithName("GetPlatformOnboardings");
+        platform.MapGet("/onboardings/{id:guid}", (Guid id, PlatformOnboardingService service,
+                CancellationToken token) => service.GetAsync(id, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformOnboarding)
+            .WithName("GetPlatformOnboarding");
+        platform.MapPost("/onboardings", CreatePlatformOnboardingAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformOnboarding)
+            .WithName("CreatePlatformOnboarding");
+        platform.MapPost("/onboardings/{id:guid}/retry", RetryPlatformOnboardingAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformOnboarding)
+            .WithName("RetryPlatformOnboarding");
 
         var api = endpoints.MapGroup("/api")
             .WithApiContext(ApiContextKind.Business)
@@ -197,6 +212,20 @@ public static class Endpoints
     }
 
     private static async Task<IResult> GetLogisticsAsync(LogisticsService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(token));
+    private static async Task<IResult> CreatePlatformOnboardingAsync(PlatformOnboardingRequest request,
+        HttpContext context, PlatformOnboardingService service, CancellationToken token)
+    {
+        var (key, error) = ReadIdempotencyKey(context);
+        if (error is not null) return error;
+        var result = await service.CreateAsync(new(request.Name, request.Slug, request.OwnerEmail,
+            request.TimeZone, request.Locale), key!, context.TraceIdentifier, token);
+        return TypedResults.Accepted($"/api/platform/onboardings/{result.OnboardingId}", result);
+    }
+    private static async Task<IResult> RetryPlatformOnboardingAsync(Guid id,
+        PlatformOnboardingRetryRequest request, HttpContext context,
+        PlatformOnboardingService service, CancellationToken token) =>
+        TypedResults.Accepted($"/api/platform/onboardings/{id}",
+            await service.RetryAsync(id, request.ExpectedVersion, context.TraceIdentifier, token));
     private static async Task<IResult> CreateInvitationAsync(InvitationRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
         TypedResults.Created("/api/membership-invitations", await service.InviteAsync(request.Email, request.Role, context.CorrelationId, token));
     private static async Task<IResult> UpdateMembershipAsync(Guid userId, MembershipRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
@@ -855,6 +884,9 @@ public sealed record DeliveryRescheduleRequest(DateOnly NewDate, string NewWindo
 public sealed record MembershipRequest(OrganizationRole Role, bool IsActive, long ExpectedVersion);
 public sealed record InvitationRequest(string Email, OrganizationRole Role);
 public sealed record InvitationAcceptanceRequest(string Token);
+public sealed record PlatformOnboardingRequest(string Name, string Slug, string OwnerEmail,
+    string TimeZone, string Locale);
+public sealed record PlatformOnboardingRetryRequest(long ExpectedVersion);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 

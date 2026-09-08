@@ -25,14 +25,15 @@ public sealed class OrganizationInvitation : ITenantOwned
     public bool IsPending(DateTimeOffset now) => RevokedAt is null && AcceptedAt is null && ExpiresAt > now;
 
     public static OrganizationInvitation Create(Guid organizationId, string email, OrganizationRole role,
-        string tokenHash, Guid createdBy, DateTimeOffset now, DateTimeOffset expiresAt)
+        string tokenHash, Guid createdBy, DateTimeOffset now, DateTimeOffset expiresAt,
+        Guid? invitationId = null)
     {
         var normalized = NormalizeEmail(email);
         if (organizationId == Guid.Empty || createdBy == Guid.Empty) throw new DomainException("Organização e autor são obrigatórios no convite.");
         if (!Enum.IsDefined(role)) throw new DomainException("O papel do convite é inválido.");
         if (string.IsNullOrWhiteSpace(tokenHash)) throw new DomainException("O token do convite é obrigatório.");
         if (expiresAt <= now) throw new DomainException("A expiração do convite deve estar no futuro.");
-        return new() { Id = Guid.NewGuid(), OrganizationId = organizationId, Email = email.Trim(),
+        return new() { Id = invitationId ?? Guid.NewGuid(), OrganizationId = organizationId, Email = email.Trim(),
             NormalizedEmail = normalized, Role = role, TokenHash = tokenHash, CreatedBy = createdBy,
             CreatedAt = now, ExpiresAt = expiresAt };
     }
