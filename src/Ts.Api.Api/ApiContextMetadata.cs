@@ -5,6 +5,7 @@ public enum ApiContextKind
     Identity,
     Platform,
     Business,
+    Webhook,
 }
 
 public sealed record ApiContextMetadata(ApiContextKind Kind);

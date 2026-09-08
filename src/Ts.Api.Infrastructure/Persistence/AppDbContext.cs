@@ -45,6 +45,9 @@ public sealed class AppDbContext : DbContext
     public DbSet<SaasPlanVersion> SaasPlanVersions => Set<SaasPlanVersion>();
     public DbSet<SaasPlanEntitlement> SaasPlanEntitlements => Set<SaasPlanEntitlement>();
     public DbSet<OrganizationSaasSubscription> OrganizationSaasSubscriptions => Set<OrganizationSaasSubscription>();
+    public DbSet<ExternalIntegrationConnection> ExternalIntegrationConnections => Set<ExternalIntegrationConnection>();
+    public DbSet<ExternalIntegrationSecret> ExternalIntegrationSecrets => Set<ExternalIntegrationSecret>();
+    public DbSet<ExternalIntegrationWebhookReceipt> ExternalIntegrationWebhookReceipts => Set<ExternalIntegrationWebhookReceipt>();
     public DbSet<CatalogOffer> CatalogOffers => Set<CatalogOffer>();
     public DbSet<ComponentType> ComponentTypes => Set<ComponentType>();
     public DbSet<CatalogAddon> CatalogAddons => Set<CatalogAddon>();
@@ -158,6 +161,53 @@ public sealed class AppDbContext : DbContext
             configuration.Property(item => item.Slug).HasMaxLength(100).IsRequired();
             configuration.Property(item => item.Version).IsConcurrencyToken();
             configuration.HasIndex(item => item.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<ExternalIntegrationSecret>(configuration =>
+        {
+            configuration.ToTable("external_integration_secrets");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.ProtectedValue).HasMaxLength(8_000).IsRequired();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ExternalIntegrationConnection>(configuration =>
+        {
+            configuration.ToTable("external_integration_connections");
+            configuration.HasKey(item => item.Id);
+            configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
+            configuration.Property(item => item.DisplayName).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.ExternalAccountId).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.AssetId).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.AssetLabel).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.LastHealthError).HasMaxLength(1_000);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<ExternalIntegrationSecret>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.AccessTokenSecretId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<ExternalIntegrationSecret>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.AppSecretSecretId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<ExternalIntegrationSecret>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.WebhookVerifyTokenSecretId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.OrganizationId, item.Provider }).IsUnique();
+            configuration.HasIndex(item => new { item.Provider, item.AssetId }).IsUnique();
+        });
+
+        modelBuilder.Entity<ExternalIntegrationWebhookReceipt>(configuration =>
+        {
+            configuration.ToTable("external_integration_webhook_receipts");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.ExternalEventId).HasMaxLength(300).IsRequired();
+            configuration.HasOne<ExternalIntegrationConnection>().WithMany()
+                .HasForeignKey(item => new { item.OrganizationId, item.ConnectionId })
+                .HasPrincipalKey(item => new { item.OrganizationId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.ConnectionId, item.ExternalEventId }).IsUnique();
         });
 
         modelBuilder.Entity<SaasPlanVersion>(configuration =>

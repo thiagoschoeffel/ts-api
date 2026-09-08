@@ -187,7 +187,22 @@ falhas exigem motivo e podem ser reagendadas sem reescrever a tentativa anterior
 
 A integração escolhida é a Meta WhatsApp Cloud API direta. O frontend recebe somente DTOs de Atendimento; `AccessToken`, `AppSecret` e token de verificação ficam exclusivamente no processo da API. O endpoint público de webhook valida a organização configurada e a assinatura HMAC antes de persistir. O identificador externo é único por tenant, de modo que a repetição do mesmo evento não duplica mensagem nem efeito. A sequência também é única por conversa e é atribuída dentro de transação serializável.
 
-Configure `WHATSAPP_ORGANIZATION_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_PHONE_NUMBER`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET` e um `WHATSAPP_WEBHOOK_VERIFY_TOKEN` aleatório. Cadastre na Meta a URL HTTPS pública `https://<api>/webhooks/whatsapp/<organization-id>` e assine o campo `messages`. O número e a Organização são decisões de deploy; não são aceitos do frontend.
+Cada empresa configura sua própria conexão WhatsApp pela administração global em
+`/api/platform/organizations/{id}/integrations`. A conexão persiste os ativos externos verificados,
+estado e saúde; os três segredos ficam em registros separados, cifrados por AES-256-GCM com
+`IntegrationSecrets:EncryptionKey` (`INTEGRATION_SECRETS_ENCRYPTION_KEY`, 32 bytes em Base64) e
+nunca retornam ao navegador. Cadastre na Meta a URL HTTPS pública exibida pela plataforma,
+`https://<api>/webhooks/whatsapp/<connection-id>`, e assine o campo `messages`. O servidor resolve a
+organização pela conexão e pela assinatura; nenhum `organizationId` do payload concede autoridade.
+O cadastro confirma o `phone_number_id` na Graph API antes de ativar a conexão. Limite mensal e
+margem de pausa da automação são configurados por conexão e preservados no snapshot de cada período.
+
+As variáveis legadas `WHATSAPP_ORGANIZATION_ID`, `WHATSAPP_PHONE_NUMBER_ID`,
+`WHATSAPP_BUSINESS_PHONE_NUMBER`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_APP_SECRET` e
+`WHATSAPP_WEBHOOK_VERIFY_TOKEN` são aceitas apenas para migração. Quando todas estiverem presentes
+e ainda não existir conexão WhatsApp para a organização, a inicialização cria uma conexão cifrada e
+auditada de forma idempotente. Depois da confirmação, remova as variáveis legadas; novos ambientes
+devem cadastrar a conexão pela plataforma.
 
 A API nunca inicia uma conversa: envia texto apenas em uma conversa previamente criada por mensagem recebida. Respostas observadas por `message_echoes` colocam a conversa em modo Humano. A coexistência com o aplicativo WhatsApp Business depende da elegibilidade e do onboarding oficial da conta; valide o espelhamento no número de teste e depois no número comercial antes do go-live.
 

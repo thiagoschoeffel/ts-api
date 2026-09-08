@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Ts.Api.Application.Attendance;
 using Ts.Api.Application.Common;
 using Ts.Api.Domain.Common;
 
@@ -20,6 +21,7 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
             PreconditionFailedException => StatusCodes.Status412PreconditionFailed,
             DbUpdateException => StatusCodes.Status409Conflict,
             DomainException => StatusCodes.Status422UnprocessableEntity,
+            WhatsAppProviderException => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status500InternalServerError,
         };
         var errorId = Guid.NewGuid().ToString("N");
@@ -47,6 +49,7 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
                     StatusCodes.Status409Conflict => "Conflito de estado",
                     StatusCodes.Status412PreconditionFailed => "Versão desatualizada",
                     StatusCodes.Status422UnprocessableEntity => "Regra de negócio inválida",
+                    StatusCodes.Status502BadGateway => "Integração externa indisponível",
                     _ => "Erro interno",
                 },
                 Detail = statusCode == StatusCodes.Status500InternalServerError
