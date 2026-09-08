@@ -49,6 +49,7 @@ public static class DependencyInjection
             Timeout = TimeSpan.FromSeconds(15),
         }, configuration));
         services.AddScoped<IPlatformRegistryStore, PlatformRegistryStore>();
+        services.AddScoped<IPlatformLifecycleStore, PlatformLifecycleStore>();
         services.AddScoped<IPlatformOnboardingStore, PlatformOnboardingStore>();
         services.AddSingleton<IOnboardingInvitationTokenFactory, OnboardingInvitationTokenFactory>();
         services.AddScoped<ICommerceStore, CommerceStore>();

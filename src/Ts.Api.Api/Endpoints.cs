@@ -59,6 +59,27 @@ public static class Endpoints
                 CancellationToken token) => service.GetOrganizationAsync(id, token))
             .RequireAuthorization(AuthorizationPolicies.PlatformRead)
             .WithName("GetPlatformOrganization");
+        platform.MapGet("/saas-plans", (PlatformLifecycleService service, CancellationToken token) =>
+                service.ListPlansAsync(token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformRead)
+            .WithName("GetSaasPlans");
+        platform.MapGet("/organizations/{id:guid}/saas-subscription", (Guid id,
+                PlatformLifecycleService service, CancellationToken token) =>
+                service.GetSubscriptionAsync(id, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformRead)
+            .WithName("GetOrganizationSaasSubscription");
+        platform.MapPut("/organizations/{id:guid}/saas-subscription", AssignSaasPlanAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
+            .WithName("AssignOrganizationSaasPlan");
+        platform.MapPost("/organizations/{id:guid}/activation", ActivateOrganizationAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
+            .WithName("ActivateOrganization");
+        platform.MapPost("/organizations/{id:guid}/suspension", SuspendOrganizationAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
+            .WithName("SuspendOrganization");
+        platform.MapPost("/organizations/{id:guid}/reactivation", ReactivateOrganizationAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
+            .WithName("ReactivateOrganization");
         platform.MapGet("/audit-events", (string? action, Guid? targetId, int page, int pageSize,
                 PlatformRegistryService service, CancellationToken token) =>
                 service.ListAuditAsync(action, targetId, page == 0 ? 1 : page,
@@ -212,6 +233,22 @@ public static class Endpoints
     }
 
     private static async Task<IResult> GetLogisticsAsync(LogisticsService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(token));
+    private static async Task<IResult> AssignSaasPlanAsync(Guid id, SaasSubscriptionRequest request,
+        HttpContext context, PlatformLifecycleService service, CancellationToken token) =>
+        TypedResults.Ok(await service.AssignPlanAsync(id, request.PlanVersionId,
+            request.ExpectedVersion, context.TraceIdentifier, token));
+    private static async Task<IResult> ActivateOrganizationAsync(Guid id, OrganizationLifecycleRequest request,
+        HttpContext context, PlatformLifecycleService service, CancellationToken token) =>
+        TypedResults.Ok(await service.ChangeStatusAsync(id, OrganizationLifecycleStatus.Active,
+            request.ExpectedVersion, request.Reason, context.TraceIdentifier, token));
+    private static async Task<IResult> SuspendOrganizationAsync(Guid id, OrganizationLifecycleRequest request,
+        HttpContext context, PlatformLifecycleService service, CancellationToken token) =>
+        TypedResults.Ok(await service.ChangeStatusAsync(id, OrganizationLifecycleStatus.Suspended,
+            request.ExpectedVersion, request.Reason, context.TraceIdentifier, token));
+    private static async Task<IResult> ReactivateOrganizationAsync(Guid id, OrganizationLifecycleRequest request,
+        HttpContext context, PlatformLifecycleService service, CancellationToken token) =>
+        TypedResults.Ok(await service.ChangeStatusAsync(id, OrganizationLifecycleStatus.Active,
+            request.ExpectedVersion, request.Reason, context.TraceIdentifier, token));
     private static async Task<IResult> CreatePlatformOnboardingAsync(PlatformOnboardingRequest request,
         HttpContext context, PlatformOnboardingService service, CancellationToken token)
     {
@@ -887,6 +924,8 @@ public sealed record InvitationAcceptanceRequest(string Token);
 public sealed record PlatformOnboardingRequest(string Name, string Slug, string OwnerEmail,
     string TimeZone, string Locale);
 public sealed record PlatformOnboardingRetryRequest(long ExpectedVersion);
+public sealed record SaasSubscriptionRequest(Guid PlanVersionId, long? ExpectedVersion);
+public sealed record OrganizationLifecycleRequest(long ExpectedVersion, string Reason);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 

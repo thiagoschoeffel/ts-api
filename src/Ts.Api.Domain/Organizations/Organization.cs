@@ -60,6 +60,27 @@ public sealed class Organization
 
     public void Deactivate() => SetStatus(OrganizationLifecycleStatus.Archived);
 
+    public void Activate()
+    {
+        if (LifecycleStatus != OrganizationLifecycleStatus.Provisioning)
+            throw new DomainException("Somente uma organização em implantação pode ser ativada.");
+        SetStatus(OrganizationLifecycleStatus.Active);
+    }
+
+    public void Suspend()
+    {
+        if (LifecycleStatus != OrganizationLifecycleStatus.Active)
+            throw new DomainException("Somente uma organização ativa pode ser suspensa.");
+        SetStatus(OrganizationLifecycleStatus.Suspended);
+    }
+
+    public void Reactivate()
+    {
+        if (LifecycleStatus != OrganizationLifecycleStatus.Suspended)
+            throw new DomainException("Somente uma organização suspensa pode ser reativada.");
+        SetStatus(OrganizationLifecycleStatus.Active);
+    }
+
     public void SetStatus(OrganizationLifecycleStatus status)
     {
         if (!Enum.IsDefined(status)) throw new DomainException("O estado da organização é inválido.");
