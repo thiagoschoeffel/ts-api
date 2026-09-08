@@ -128,6 +128,10 @@ GET  /api/platform/access
 GET  /api/platform/organizations
 GET  /api/platform/organizations/{organizationId}
 GET  /api/platform/audit-events
+GET  /api/platform/onboardings
+POST /api/platform/onboardings
+GET  /api/platform/onboardings/{onboardingId}
+POST /api/platform/onboardings/{onboardingId}/retry
 GET  /api/membership-invitations
 POST /api/membership-invitations
 GET  /api/attendance
@@ -155,6 +159,8 @@ dotnet run --project src/Ts.Api.Api -- bootstrap-platform-operator \
 O comando é idempotente para usuário/perfil ativo e registra o resultado em `platform_audit_events`. Produção deve executá-lo em ambiente administrativo controlado e exigir MFA do operador no provedor OIDC.
 
 Convites de membros são enviados pelo Resend. Configure `Resend:ApiKey`, `Resend:From` com um remetente de domínio verificado e `Resend:InvitationUrl` apontando para `/convites/aceitar` no host. A chave nunca é exposta ao frontend. O token é enviado apenas no link e somente seu hash SHA-256 é persistido; o aceite autenticado exige o mesmo claim `email`, é de uso único e cria a associação de forma transacional.
+
+O onboarding global exige a capacidade `platform.onboarding.manage` e `Idempotency-Key`. A criação persiste empresa em provisionamento, convite do primeiro `Owner`, operação, outbox e auditoria na mesma transação e responde `202` com `onboardingId` e `operationId`. Um worker reivindica operações com lease de dois minutos, retoma leases vencidos após reinício e aplica backoff exponencial por até cinco tentativas; depois disso a operação fica em `NeedsAttention` e pode ser retomada pelo endpoint de retry com `expectedVersion`. O Resend recebe como chave idempotente o ID do convite, portanto uma queda depois do envio não duplica a mensagem. Configure `Onboarding:InvitationTokenSecret` por `ONBOARDING_INVITATION_TOKEN_SECRET` com ao menos 32 caracteres; o token é derivado por HMAC e somente seu hash permanece no convite.
 
 Leituras aceitam qualquer associação ativa. Operações de Pedido, estoque e planejamento logístico aceitam `Owner`, `Administrator` e `Operator`; o registro de tentativa também aceita uma associação `DeliveryDriver`, sempre dentro da Organização ativa. Configuração de Catálogo, Produção, capacidade, Planos, restrições, Financeiro e cadastro de entregadores exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
 
@@ -224,7 +230,7 @@ dotnet test --no-restore --disable-build-servers -m:1
 dotnet build --configuration Release --no-restore --disable-build-servers -m:1
 ```
 
-Os testes de persistência atuais usam EF Core InMemory. Eles validam regras e mapeamentos exercitados pela suíte, mas não substituem a aplicação das migrations em PostgreSQL real.
+Os testes de persistência comuns usam EF Core InMemory. O cenário de reinício do onboarding também usa PostgreSQL quando `TS_API_TEST_DATABASE` aponta para um banco descartável já autorizado para testes; sem essa variável, ele não acessa banco externo. A aplicação separada de toda a cadeia de migrations continua obrigatória para mudanças de persistência.
 
 Em ambientes Codex restritos, execute o `dotnet test` com permissão ampliada, pois o VSTest abre um socket local. Execute comandos `docker compose` da mesma forma para acessar o socket do Docker. Uma falha `SocketException (13): Permission denied` durante a inicialização do runner indica bloqueio do sandbox, não falha dos testes.
 

@@ -39,6 +39,9 @@ public sealed class AppDbContext : DbContext
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
     public DbSet<PlatformOperatorGrant> PlatformOperatorGrants => Set<PlatformOperatorGrant>();
     public DbSet<PlatformAuditEvent> PlatformAuditEvents => Set<PlatformAuditEvent>();
+    public DbSet<PlatformOnboarding> PlatformOnboardings => Set<PlatformOnboarding>();
+    public DbSet<PlatformProvisioningOperation> PlatformProvisioningOperations => Set<PlatformProvisioningOperation>();
+    public DbSet<PlatformOutboxMessage> PlatformOutboxMessages => Set<PlatformOutboxMessage>();
     public DbSet<CatalogOffer> CatalogOffers => Set<CatalogOffer>();
     public DbSet<ComponentType> ComponentTypes => Set<ComponentType>();
     public DbSet<CatalogAddon> CatalogAddons => Set<CatalogAddon>();
@@ -226,6 +229,54 @@ public sealed class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict).IsRequired(false);
             configuration.HasIndex(item => new { item.OccurredAt, item.Id });
             configuration.HasIndex(item => item.CorrelationId);
+        });
+
+        modelBuilder.Entity<PlatformOnboarding>(configuration =>
+        {
+            configuration.ToTable("platform_onboardings");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.OwnerEmail).HasMaxLength(254).IsRequired();
+            configuration.Property(item => item.TimeZone).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.Locale).HasMaxLength(20).IsRequired();
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<OrganizationInvitation>().WithMany().HasForeignKey(item => item.OwnerInvitationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => item.OrganizationId).IsUnique();
+            configuration.HasIndex(item => new { item.UpdatedAt, item.Id });
+        });
+
+        modelBuilder.Entity<PlatformProvisioningOperation>(configuration =>
+        {
+            configuration.ToTable("platform_provisioning_operations");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.RequestFingerprint).HasMaxLength(64).IsRequired();
+            configuration.Property(item => item.CurrentStep).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.LeaseOwner).HasMaxLength(200);
+            configuration.Property(item => item.LastError).HasMaxLength(1000);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<PlatformOnboarding>().WithMany().HasForeignKey(item => item.OnboardingId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => item.OnboardingId).IsUnique();
+            configuration.HasIndex(item => item.IdempotencyKey).IsUnique();
+            configuration.HasIndex(item => new { item.Status, item.NextAttemptAt, item.LeaseUntil });
+        });
+
+        modelBuilder.Entity<PlatformOutboxMessage>(configuration =>
+        {
+            configuration.ToTable("platform_outbox_messages");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Kind).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<PlatformProvisioningOperation>().WithMany()
+                .HasForeignKey(item => item.OperationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<OrganizationInvitation>().WithMany()
+                .HasForeignKey(item => item.InvitationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => item.OperationId).IsUnique();
+            configuration.HasIndex(item => item.InvitationId).IsUnique();
+            configuration.HasIndex(item => new { item.Status, item.CreatedAt });
         });
 
         modelBuilder.Entity<AuditEvent>(configuration =>
