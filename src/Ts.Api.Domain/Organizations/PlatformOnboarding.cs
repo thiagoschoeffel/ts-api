@@ -51,6 +51,15 @@ public sealed class PlatformOnboarding
         Version++;
     }
 
+    public void MarkActive(DateTimeOffset now)
+    {
+        if (Status != PlatformOnboardingStatus.AwaitingOwner)
+            throw new DomainException("Somente um onboarding com proprietário convidado pode ser ativado.");
+        Status = PlatformOnboardingStatus.Active;
+        UpdatedAt = now;
+        Version++;
+    }
+
     public void Resume(DateTimeOffset now)
     {
         if (Status != PlatformOnboardingStatus.NeedsAttention)

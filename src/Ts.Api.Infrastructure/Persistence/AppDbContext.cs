@@ -42,6 +42,9 @@ public sealed class AppDbContext : DbContext
     public DbSet<PlatformOnboarding> PlatformOnboardings => Set<PlatformOnboarding>();
     public DbSet<PlatformProvisioningOperation> PlatformProvisioningOperations => Set<PlatformProvisioningOperation>();
     public DbSet<PlatformOutboxMessage> PlatformOutboxMessages => Set<PlatformOutboxMessage>();
+    public DbSet<SaasPlanVersion> SaasPlanVersions => Set<SaasPlanVersion>();
+    public DbSet<SaasPlanEntitlement> SaasPlanEntitlements => Set<SaasPlanEntitlement>();
+    public DbSet<OrganizationSaasSubscription> OrganizationSaasSubscriptions => Set<OrganizationSaasSubscription>();
     public DbSet<CatalogOffer> CatalogOffers => Set<CatalogOffer>();
     public DbSet<ComponentType> ComponentTypes => Set<ComponentType>();
     public DbSet<CatalogAddon> CatalogAddons => Set<CatalogAddon>();
@@ -155,6 +158,38 @@ public sealed class AppDbContext : DbContext
             configuration.Property(item => item.Slug).HasMaxLength(100).IsRequired();
             configuration.Property(item => item.Version).IsConcurrencyToken();
             configuration.HasIndex(item => item.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<SaasPlanVersion>(configuration =>
+        {
+            configuration.ToTable("saas_plan_versions");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Code).HasMaxLength(60).IsRequired();
+            configuration.Property(item => item.Name).HasMaxLength(120).IsRequired();
+            configuration.HasIndex(item => new { item.Code, item.Version }).IsUnique();
+        });
+
+        modelBuilder.Entity<SaasPlanEntitlement>(configuration =>
+        {
+            configuration.ToTable("saas_plan_entitlements");
+            configuration.HasKey(item => new { item.PlanVersionId, item.Code });
+            configuration.Property(item => item.Code).HasMaxLength(100).IsRequired();
+            configuration.HasOne<SaasPlanVersion>().WithMany().HasForeignKey(item => item.PlanVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OrganizationSaasSubscription>(configuration =>
+        {
+            configuration.ToTable("organization_saas_subscriptions");
+            configuration.HasKey(item => item.OrganizationId);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithOne().HasForeignKey<OrganizationSaasSubscription>(item => item.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<SaasPlanVersion>().WithMany().HasForeignKey(item => item.PlanVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.AssignedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => item.PlanVersionId);
         });
 
         modelBuilder.Entity<PlatformUser>(configuration =>

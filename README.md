@@ -22,6 +22,8 @@ As fatias implementadas estabelecem:
 - políticas de leitura, operação e administração derivadas do papel da associação;
 - grants globais de plataforma separados dos papéis tenant, com capacidades retornadas pela sessão;
 - classificação explícita dos endpoints entre identidade, plataforma e negócio;
+- versões imutáveis de plano SaaS, habilitações e assinatura por organização;
+- ativação, suspensão e reativação concorrentes e auditáveis, com bloqueio autoritativo das APIs de negócio;
 - domínio inicial de congelados (configuração, lote, validade e movimentação);
 - política central de validade de 90 dias corridos usando `DateOnly`;
 - fontes autoritativas completas de Oferta, tipos de componente, escolhas, adicionais e Item Produzível;
@@ -127,6 +129,12 @@ POST /api/identity/invitations/accept
 GET  /api/platform/access
 GET  /api/platform/organizations
 GET  /api/platform/organizations/{organizationId}
+GET  /api/platform/saas-plans
+GET  /api/platform/organizations/{organizationId}/saas-subscription
+PUT  /api/platform/organizations/{organizationId}/saas-subscription
+POST /api/platform/organizations/{organizationId}/activation
+POST /api/platform/organizations/{organizationId}/suspension
+POST /api/platform/organizations/{organizationId}/reactivation
 GET  /api/platform/audit-events
 GET  /api/platform/onboardings
 POST /api/platform/onboardings
@@ -142,7 +150,7 @@ GET  /webhooks/whatsapp/{organizationId}
 POST /webhooks/whatsapp/{organizationId}
 ```
 
-Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token precisa ter audiência `ts-api` e subject (`sub`) correspondente a um usuário ativo da plataforma. Endpoints de negócio também exigem organização ativa pela claim `organization_id` ou por `X-Organization-Id`; identidade e plataforma não aceitam um tenant artificial. Para solicitar outra associação do mesmo usuário, o shell envia `X-Organization-Id`; a API só aceita o valor depois de confirmar usuário, Organização e associação ativos no banco. O header é uma solicitação de seleção, nunca autoridade de isolamento.
+Todos os endpoints sob `/api` exigem `Authorization: Bearer <token>`. O token precisa ter audiência `ts-api` e subject (`sub`) correspondente a um usuário ativo da plataforma. Endpoints de negócio também exigem organização ativa, assinatura SaaS com `business.access` e seleção pela claim `organization_id` ou por `X-Organization-Id`; identidade e plataforma não aceitam um tenant artificial. Para solicitar outra associação do mesmo usuário, o shell envia `X-Organization-Id`; a API só aceita o valor depois de confirmar usuário, Organização e associação ativos no banco. O header é uma solicitação de seleção, nunca autoridade de isolamento.
 
 `GET /api/identity/session` é o contrato canônico de bootstrap; `GET /api/session` permanece como alias de compatibilidade. A resposta inclui associações e os perfis/capacidades globais derivados de grants ativos no banco. Papéis `Owner`/`Administrator` não concedem capacidades da plataforma.
 
@@ -161,6 +169,8 @@ O comando é idempotente para usuário/perfil ativo e registra o resultado em `p
 Convites de membros são enviados pelo Resend. Configure `Resend:ApiKey`, `Resend:From` com um remetente de domínio verificado e `Resend:InvitationUrl` apontando para `/convites/aceitar` no host. A chave nunca é exposta ao frontend. O token é enviado apenas no link e somente seu hash SHA-256 é persistido; o aceite autenticado exige o mesmo claim `email`, é de uso único e cria a associação de forma transacional.
 
 O onboarding global exige a capacidade `platform.onboarding.manage` e `Idempotency-Key`. A criação persiste empresa em provisionamento, convite do primeiro `Owner`, operação, outbox e auditoria na mesma transação e responde `202` com `onboardingId` e `operationId`. Um worker reivindica operações com lease de dois minutos, retoma leases vencidos após reinício e aplica backoff exponencial por até cinco tentativas; depois disso a operação fica em `NeedsAttention` e pode ser retomada pelo endpoint de retry com `expectedVersion`. O Resend recebe como chave idempotente o ID do convite, portanto uma queda depois do envio não duplica a mensagem. Configure `Onboarding:InvitationTokenSecret` por `ONBOARDING_INVITATION_TOKEN_SECRET` com ao menos 32 caracteres; o token é derivado por HMAC e somente seu hash permanece no convite.
+
+O catálogo inicial de plano SaaS contém a versão imutável `complete` v1. A migration atribui essa versão às organizações ativas preexistentes que possuam uma associação ativa, preservando seu acesso. Novas organizações recebem o plano explicitamente no detalhe administrativo. Ativação exige plano com `business.access`, proprietário ativo e provisionamento obrigatório concluído; suspensão mantém vínculos e dados, mas falha fechada no middleware de negócio. Todos os comandos exigem a versão esperada e registram ator, correlação e motivo na auditoria global.
 
 Leituras aceitam qualquer associação ativa. Operações de Pedido, estoque e planejamento logístico aceitam `Owner`, `Administrator` e `Operator`; o registro de tentativa também aceita uma associação `DeliveryDriver`, sempre dentro da Organização ativa. Configuração de Catálogo, Produção, capacidade, Planos, restrições, Financeiro e cadastro de entregadores exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
 

@@ -40,4 +40,18 @@ public sealed class OrganizationLifecycleTests
         Assert.False(organization.IsActive);
         Assert.Equal(2, organization.Version);
     }
+
+    [Fact]
+    public void Suspension_and_reactivation_follow_the_explicit_transition_matrix()
+    {
+        var organization = Organization.Create("Empresa", "empresa");
+        organization.Suspend();
+        Assert.Equal(OrganizationLifecycleStatus.Suspended, organization.LifecycleStatus);
+        Assert.False(organization.IsActive);
+
+        organization.Reactivate();
+        Assert.Equal(OrganizationLifecycleStatus.Active, organization.LifecycleStatus);
+        Assert.True(organization.IsActive);
+        Assert.Throws<DomainException>(organization.Reactivate);
+    }
 }

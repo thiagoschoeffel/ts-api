@@ -118,6 +118,7 @@ builder.Services.AddScoped<PackOrderHandler>();
 builder.Services.AddScoped<RecordLabelPrintHandler>();
 builder.Services.AddScoped<MembershipService>();
 builder.Services.AddScoped<PlatformRegistryService>();
+builder.Services.AddScoped<PlatformLifecycleService>();
 builder.Services.AddScoped<PlatformOnboardingService>();
 builder.Services.AddScoped<PlatformOnboardingProcessor>();
 builder.Services.AddHostedService<PlatformOnboardingWorker>();

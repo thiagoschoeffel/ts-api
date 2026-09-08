@@ -47,6 +47,28 @@ public sealed class OrganizationContextMiddlewareTests
     }
 
     [Fact]
+    public async Task Blocks_business_access_without_the_required_saas_entitlement()
+    {
+        var fixture = await Fixture.CreateAsync(withMembership: true, withBusinessAccess: false);
+
+        await fixture.InvokeAsync(authenticated: true, fixture.OrganizationId);
+
+        Assert.Equal(StatusCodes.Status403Forbidden, fixture.HttpContext.Response.StatusCode);
+        Assert.False(fixture.NextWasCalled);
+    }
+
+    [Fact]
+    public async Task Blocks_a_feature_that_is_not_in_the_organization_plan()
+    {
+        var fixture = await Fixture.CreateAsync(withMembership: true, withAllFeatures: false);
+
+        await fixture.InvokeAsync(authenticated: true, fixture.OrganizationId, path: "/api/attendance");
+
+        Assert.Equal(StatusCodes.Status403Forbidden, fixture.HttpContext.Response.StatusCode);
+        Assert.False(fixture.NextWasCalled);
+    }
+
+    [Fact]
     public async Task Session_discovery_resolves_the_user_without_requiring_an_organization()
     {
         var fixture = await Fixture.CreateAsync(withMembership: false);
@@ -111,7 +133,8 @@ public sealed class OrganizationContextMiddlewareTests
         public string Subject { get; }
         public bool NextWasCalled { get; private set; }
 
-        public static async Task<Fixture> CreateAsync(bool withMembership)
+        public static async Task<Fixture> CreateAsync(bool withMembership, bool withBusinessAccess = true,
+            bool withAllFeatures = true)
         {
             var organization = Organization.Create("Organização A", "organizacao-a");
             var user = PlatformUser.Create(Guid.NewGuid().ToString(), "Usuário A");
@@ -124,6 +147,23 @@ public sealed class OrganizationContextMiddlewareTests
             {
                 database.OrganizationMemberships.Add(OrganizationMembership.Create(
                     organization.Id, user.Id, OrganizationRole.Operator));
+            }
+            if (withBusinessAccess)
+            {
+                var plan = SaasPlanVersion.Create("test", "Teste", 1, true, DateTimeOffset.UtcNow);
+                database.SaasPlanVersions.Add(plan);
+                database.SaasPlanEntitlements.Add(SaasPlanEntitlement.Create(plan.Id, SaasEntitlements.BusinessAccess));
+                if (withAllFeatures)
+                {
+                    database.SaasPlanEntitlements.AddRange(
+                        SaasPlanEntitlement.Create(plan.Id, SaasEntitlements.Attendance),
+                        SaasPlanEntitlement.Create(plan.Id, SaasEntitlements.Catalog),
+                        SaasPlanEntitlement.Create(plan.Id, SaasEntitlements.Commerce),
+                        SaasPlanEntitlement.Create(plan.Id, SaasEntitlements.Logistics),
+                        SaasPlanEntitlement.Create(plan.Id, SaasEntitlements.Operations));
+                }
+                database.OrganizationSaasSubscriptions.Add(OrganizationSaasSubscription.Create(
+                    organization.Id, plan.Id, user.Id, DateTimeOffset.UtcNow));
             }
             await database.SaveChangesAsync();
             return new Fixture(database, new HttpRequestContext(), new DefaultHttpContext(),

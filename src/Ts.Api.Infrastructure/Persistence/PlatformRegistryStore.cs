@@ -41,6 +41,69 @@ public sealed class PlatformRegistryStore(AppDbContext database) : IPlatformRegi
     }
 }
 
+public sealed class PlatformLifecycleStore(AppDbContext database) : IPlatformLifecycleStore
+{
+    public async Task<IReadOnlyCollection<(SaasPlanVersion Plan, IReadOnlyCollection<string> Entitlements)>>
+        ListAvailablePlansAsync(CancellationToken token)
+    {
+        var plans = await database.SaasPlanVersions.AsNoTracking().Where(item => item.IsAvailable)
+            .OrderBy(item => item.Name).ThenByDescending(item => item.Version).ToArrayAsync(token);
+        var ids = plans.Select(item => item.Id).ToArray();
+        var entitlements = await database.SaasPlanEntitlements.AsNoTracking()
+            .Where(item => ids.Contains(item.PlanVersionId)).ToArrayAsync(token);
+        return plans.Select(plan => (plan, (IReadOnlyCollection<string>)entitlements
+            .Where(item => item.PlanVersionId == plan.Id).Select(item => item.Code).ToArray())).ToArray();
+    }
+
+    public Task<SaasPlanVersion?> FindPlanAsync(Guid id, CancellationToken token) =>
+        database.SaasPlanVersions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, token);
+
+    public async Task<IReadOnlyCollection<string>> GetEntitlementsAsync(Guid planVersionId,
+        CancellationToken token) => await database.SaasPlanEntitlements.AsNoTracking()
+        .Where(item => item.PlanVersionId == planVersionId).Select(item => item.Code).ToArrayAsync(token);
+
+    public Task<Organization?> FindOrganizationAsync(Guid id, CancellationToken token) =>
+        database.Organizations.SingleOrDefaultAsync(item => item.Id == id, token);
+
+    public Task<OrganizationSaasSubscription?> FindSubscriptionAsync(Guid organizationId,
+        CancellationToken token) => database.OrganizationSaasSubscriptions
+        .SingleOrDefaultAsync(item => item.OrganizationId == organizationId, token);
+
+    public Task<bool> HasActiveOwnerAsync(Guid organizationId, CancellationToken token) =>
+        database.OrganizationMemberships.IgnoreQueryFilters().AnyAsync(item =>
+            item.OrganizationId == organizationId && item.Role == OrganizationRole.Owner && item.IsActive, token);
+
+    public async Task<bool> IsOnboardingReadyAsync(Guid organizationId, CancellationToken token)
+    {
+        var onboarding = await database.PlatformOnboardings.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.OrganizationId == organizationId, token);
+        if (onboarding is null) return true;
+        return await database.PlatformProvisioningOperations.AsNoTracking().AnyAsync(item =>
+            item.OnboardingId == onboarding.Id && item.Status == PlatformProvisioningOperationStatus.Succeeded, token);
+    }
+
+    public async Task MarkOnboardingActiveAsync(Guid organizationId, DateTimeOffset now,
+        CancellationToken token)
+    {
+        var onboarding = await database.PlatformOnboardings
+            .SingleOrDefaultAsync(item => item.OrganizationId == organizationId, token);
+        if (onboarding is not null) onboarding.MarkActive(now);
+    }
+
+    public async Task<T> ExecuteSerializableAsync<T>(Func<CancellationToken, Task<T>> action,
+        CancellationToken token)
+    {
+        if (!database.Database.IsRelational()) return await action(token);
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+        var result = await action(token);
+        await transaction.CommitAsync(token);
+        return result;
+    }
+
+    public void Add(object entity) => database.Add(entity);
+    public Task SaveChangesAsync(CancellationToken token) => database.SaveChangesAsync(token);
+}
+
 public sealed class PlatformOnboardingStore(AppDbContext database) : IPlatformOnboardingStore
 {
     public Task<PlatformProvisioningOperation?> FindOperationByIdempotencyKeyAsync(

@@ -158,6 +158,20 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
             return;
         }
 
+        var entitlements = await database.OrganizationSaasSubscriptions.AsNoTracking()
+            .Where(item => item.OrganizationId == requestedOrganizationId)
+            .Join(database.SaasPlanEntitlements.AsNoTracking(), subscription => subscription.PlanVersionId,
+                entitlement => entitlement.PlanVersionId, (_, entitlement) => entitlement.Code)
+            .ToArrayAsync(httpContext.RequestAborted);
+        var requiredEntitlement = RequiredEntitlement(httpContext.Request.Path);
+        if (!entitlements.Contains(SaasEntitlements.BusinessAccess, StringComparer.Ordinal)
+            || requiredEntitlement is not null
+            && !entitlements.Contains(requiredEntitlement, StringComparer.Ordinal))
+        {
+            await Forbid(httpContext, "O plano SaaS da organização não habilita esta API de negócio.");
+            return;
+        }
+
         requestContext.Set(requestedOrganizationId, platformUser.Id, correlationId);
         httpContext.Items[AuthorizationPolicies.MembershipRoleItem] = membership!.Role;
         await next(httpContext);
@@ -167,6 +181,29 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
         statusCode: StatusCodes.Status403Forbidden,
         title: "Acesso à organização negado",
         detail: detail).ExecuteAsync(context);
+
+    internal static string? RequiredEntitlement(PathString path)
+    {
+        var value = path.Value ?? string.Empty;
+        if (value.StartsWith("/api/attendance", StringComparison.OrdinalIgnoreCase)) return SaasEntitlements.Attendance;
+        if (value.StartsWith("/api/catalog", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/menus", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/menu-plans", StringComparison.OrdinalIgnoreCase)) return SaasEntitlements.Catalog;
+        if (value.StartsWith("/api/commerce", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/customers", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/plans", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/plan-credit", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/financial-credit", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/payments", StringComparison.OrdinalIgnoreCase)) return SaasEntitlements.Commerce;
+        if (value.StartsWith("/api/logistics", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/delivery-", StringComparison.OrdinalIgnoreCase)) return SaasEntitlements.Logistics;
+        if (value.StartsWith("/api/production", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/frozen-stock", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/operations", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/daily-capacities", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("/api/orders", StringComparison.OrdinalIgnoreCase)) return SaasEntitlements.Operations;
+        return null;
+    }
 }
 
 public static class AuthorizationPolicies
