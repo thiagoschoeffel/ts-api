@@ -255,7 +255,11 @@ dotnet test --no-restore --disable-build-servers -m:1
 dotnet build --configuration Release --no-restore --disable-build-servers -m:1
 ```
 
-Os testes de persistência comuns usam EF Core InMemory. O cenário de reinício do onboarding também usa PostgreSQL quando `TS_API_TEST_DATABASE` aponta para um banco descartável já autorizado para testes; sem essa variável, ele não acessa banco externo. A aplicação separada de toda a cadeia de migrations continua obrigatória para mudanças de persistência.
+Os testes de persistência comuns usam EF Core InMemory. Os cenários de reinício e aceite A/B do
+onboarding usam PostgreSQL quando `TS_API_TEST_DATABASE` aponta para um banco descartável já
+autorizado para testes; sem essa variável, eles não acessam banco externo. O CI define a variável
+para seu PostgreSQL efêmero, portanto não permite que esses gates sejam pulados. A aplicação
+separada de toda a cadeia de migrations continua obrigatória para mudanças de persistência.
 
 Em ambientes Codex restritos, execute o `dotnet test` com permissão ampliada, pois o VSTest abre um socket local. Execute comandos `docker compose` da mesma forma para acessar o socket do Docker. Uma falha `SocketException (13): Permission denied` durante a inicialização do runner indica bloqueio do sandbox, não falha dos testes.
 

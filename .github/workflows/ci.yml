@@ -27,6 +27,7 @@ jobs:
           --health-retries 20
     env:
       ConnectionStrings__Database: Host=localhost;Port=5432;Database=ts_api_ci;Username=ts_api;Password=ci-only
+      TS_API_TEST_DATABASE: Host=localhost;Port=5432;Database=ts_api_ci;Username=ts_api;Password=ci-only
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-dotnet@v5
