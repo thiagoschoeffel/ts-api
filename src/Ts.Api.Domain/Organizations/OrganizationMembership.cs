@@ -18,6 +18,7 @@ public sealed class OrganizationMembership : ITenantOwned
     public Guid UserId { get; private set; }
     public OrganizationRole Role { get; private set; }
     public bool IsActive { get; private set; }
+    public long Version { get; private set; } = 1;
 
     public static OrganizationMembership Create(Guid organizationId, Guid userId, OrganizationRole role)
     {
@@ -34,11 +35,13 @@ public sealed class OrganizationMembership : ITenantOwned
         return new OrganizationMembership(organizationId, userId, role);
     }
 
-    public void Update(OrganizationRole role, bool isActive)
+    public void Update(OrganizationRole role, bool isActive, long expectedVersion)
     {
+        if (Version != expectedVersion) throw new DomainException("A associação foi alterada por outro usuário. Recarregue os dados.");
         if (!Enum.IsDefined(role)) throw new DomainException("O papel do usuário na organização é inválido.");
         Role = role;
         IsActive = isActive;
+        Version++;
     }
 }
 

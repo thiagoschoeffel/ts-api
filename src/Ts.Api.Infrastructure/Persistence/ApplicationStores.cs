@@ -22,7 +22,7 @@ using Ts.Api.Domain.Production;
 
 namespace Ts.Api.Infrastructure.Persistence;
 
-public sealed class MembershipStore(AppDbContext database) : IMembershipStore
+public sealed class MembershipStore(AppDbContext database, IOrganizationContext organization) : IMembershipStore
 {
     public async Task<IReadOnlyList<(OrganizationMembership Membership, PlatformUser User)>> GetAsync(CancellationToken token)
     {
@@ -33,10 +33,29 @@ public sealed class MembershipStore(AppDbContext database) : IMembershipStore
             (membership, user) => (membership, user)).OrderBy(item => item.user.DisplayName).ToArray();
     }
     public Task<PlatformUser?> FindUserBySubjectAsync(string subject, CancellationToken token) =>
-        database.Users.SingleOrDefaultAsync(user => user.ExternalSubject == subject && user.IsActive, token);
-    public Task<OrganizationMembership?> FindAsync(Guid userId, CancellationToken token) =>
-        database.OrganizationMemberships.SingleOrDefaultAsync(item => item.UserId == userId, token);
+        database.Users.IgnoreQueryFilters().SingleOrDefaultAsync(user => user.ExternalSubject == subject && user.IsActive, token);
+    public Task<OrganizationMembership?> FindAsync(Guid organizationId, Guid userId, CancellationToken token) =>
+        database.OrganizationMemberships.IgnoreQueryFilters().SingleOrDefaultAsync(item => item.OrganizationId == organizationId && item.UserId == userId, token);
+    public async Task<IReadOnlyList<OrganizationInvitation>> GetInvitationsAsync(CancellationToken token) =>
+        await database.OrganizationInvitations.Where(item => item.AcceptedAt == null && item.RevokedAt == null)
+            .OrderByDescending(item => item.CreatedAt).ToListAsync(token);
+    public Task<Organization> GetOrganizationAsync(CancellationToken token) => database.Organizations
+        .SingleAsync(item => item.Id == organization.OrganizationId, token);
+    public Task<OrganizationInvitation?> FindPendingInvitationAsync(string normalizedEmail, CancellationToken token) =>
+        database.OrganizationInvitations.SingleOrDefaultAsync(item => item.NormalizedEmail == normalizedEmail && item.AcceptedAt == null && item.RevokedAt == null, token);
+    public Task<OrganizationInvitation?> FindInvitationByTokenHashAsync(string tokenHash, CancellationToken token) =>
+        database.OrganizationInvitations.IgnoreQueryFilters().SingleOrDefaultAsync(item => item.TokenHash == tokenHash, token);
+    public Task<int> CountActiveOwnersAsync(Guid exceptUserId, CancellationToken token) => database.OrganizationMemberships
+        .CountAsync(item => item.UserId != exceptUserId && item.Role == OrganizationRole.Owner && item.IsActive, token);
+    public async Task<T> ExecuteSerializableAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken token)
+    {
+        if (!database.Database.IsRelational()) return await operation(token);
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
+        var result = await operation(token); await transaction.CommitAsync(token); return result;
+    }
+    public void Add(PlatformUser user) => database.Users.Add(user);
     public void Add(OrganizationMembership membership) => database.OrganizationMemberships.Add(membership);
+    public void Add(OrganizationInvitation invitation) => database.OrganizationInvitations.Add(invitation);
     public void Add(AuditEvent auditEvent) => database.AuditEvents.Add(auditEvent);
     public Task SaveChangesAsync(CancellationToken token) => database.SaveChangesAsync(token);
 }

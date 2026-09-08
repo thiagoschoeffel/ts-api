@@ -36,6 +36,11 @@ public static class Endpoints
             .WithApiContext(ApiContextKind.Identity)
             .RequireAuthorization()
             .WithName("GetIdentitySession");
+        endpoints.MapPost("/api/identity/invitations/accept", AcceptInvitationAsync)
+            .WithApiContext(ApiContextKind.Identity)
+            .AllowUnregisteredIdentity()
+            .RequireAuthorization()
+            .WithName("AcceptOrganizationInvitation");
 
         var platform = endpoints.MapGroup("/api/platform")
             .WithApiContext(ApiContextKind.Platform);
@@ -66,8 +71,10 @@ public static class Endpoints
             .RequireAuthorization(AuthorizationPolicies.Read);
         api.MapGet("/memberships", (MembershipService service, CancellationToken token) => service.GetAsync(token))
             .RequireAuthorization(AuthorizationPolicies.Administer).WithName("GetMemberships");
-        api.MapPost("/memberships", CreateMembershipAsync)
-            .RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateMembership");
+        api.MapGet("/membership-invitations", (MembershipService service, CancellationToken token) => service.GetInvitationsAsync(token))
+            .RequireAuthorization(AuthorizationPolicies.Administer).WithName("GetMembershipInvitations");
+        api.MapPost("/membership-invitations", CreateInvitationAsync)
+            .RequireAuthorization(AuthorizationPolicies.Administer).WithName("CreateMembershipInvitation");
         api.MapPut("/memberships/{userId:guid}", UpdateMembershipAsync)
             .RequireAuthorization(AuthorizationPolicies.Administer).WithName("UpdateMembership");
 
@@ -190,10 +197,16 @@ public static class Endpoints
     }
 
     private static async Task<IResult> GetLogisticsAsync(LogisticsService service, CancellationToken token) => TypedResults.Ok(await service.GetAsync(token));
-    private static async Task<IResult> CreateMembershipAsync(MembershipRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
-        TypedResults.Created("/api/memberships", await service.SaveAsync(null, request.ExternalSubject, request.Role, request.IsActive, context.CorrelationId, token));
+    private static async Task<IResult> CreateInvitationAsync(InvitationRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
+        TypedResults.Created("/api/membership-invitations", await service.InviteAsync(request.Email, request.Role, context.CorrelationId, token));
     private static async Task<IResult> UpdateMembershipAsync(Guid userId, MembershipRequest request, MembershipService service, HttpRequestContext context, CancellationToken token) =>
-        TypedResults.Ok(await service.SaveAsync(userId, request.ExternalSubject, request.Role, request.IsActive, context.CorrelationId, token));
+        TypedResults.Ok(await service.UpdateAsync(userId, request.Role, request.IsActive, request.ExpectedVersion, context.CorrelationId, token));
+    private static async Task<IResult> AcceptInvitationAsync(InvitationAcceptanceRequest request, HttpContext httpContext, MembershipService service, CancellationToken token) =>
+        TypedResults.Ok(await service.AcceptAsync(request.Token,
+            httpContext.User.FindFirstValue("sub") ?? string.Empty,
+            httpContext.User.FindFirstValue("email") ?? string.Empty,
+            httpContext.User.FindFirstValue("name") ?? httpContext.User.Identity?.Name ?? "Usuário",
+            httpContext.TraceIdentifier, token));
     private static async Task<IResult> SendAttendanceMessageAsync(Guid id, AttendanceMessageRequest request, HttpContext context, AttendanceService service, CancellationToken token)
     { var key = ReadIdempotencyKey(context); return key.Error ?? TypedResults.Ok(await service.SendAsync(id, request.Content, key.Value!, token)); }
     private static async Task<IResult> CreateDeliveryDriverAsync(DeliveryDriverRequest request, LogisticsService service, CancellationToken token) =>
@@ -839,7 +852,9 @@ public sealed record DeliveryRouteRequest(DateOnly Date, string DeliveryWindow, 
 public sealed record DeliveryRouteVersionRequest(long ExpectedVersion);
 public sealed record DeliveryAttemptRequest(DeliveryAttemptResult Result, string? FailureReason = null, string? Note = null, string? ReceivedBy = null);
 public sealed record DeliveryRescheduleRequest(DateOnly NewDate, string NewWindow, string Reason);
-public sealed record MembershipRequest(string ExternalSubject, OrganizationRole Role, bool IsActive = true);
+public sealed record MembershipRequest(OrganizationRole Role, bool IsActive, long ExpectedVersion);
+public sealed record InvitationRequest(string Email, OrganizationRole Role);
+public sealed record InvitationAcceptanceRequest(string Token);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 

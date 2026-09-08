@@ -36,6 +36,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<PlatformUser> Users => Set<PlatformUser>();
     public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
+    public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
     public DbSet<PlatformOperatorGrant> PlatformOperatorGrants => Set<PlatformOperatorGrant>();
     public DbSet<PlatformAuditEvent> PlatformAuditEvents => Set<PlatformAuditEvent>();
     public DbSet<CatalogOffer> CatalogOffers => Set<CatalogOffer>();
@@ -159,13 +160,16 @@ public sealed class AppDbContext : DbContext
             configuration.HasKey(item => item.Id);
             configuration.Property(item => item.ExternalSubject).HasMaxLength(200).IsRequired();
             configuration.Property(item => item.DisplayName).HasMaxLength(160).IsRequired();
+            configuration.Property(item => item.Email).HasMaxLength(254);
             configuration.HasIndex(item => item.ExternalSubject).IsUnique();
+            configuration.HasIndex(item => item.Email).IsUnique();
         });
 
         modelBuilder.Entity<OrganizationMembership>(configuration =>
         {
             configuration.ToTable("organization_memberships");
             configuration.HasKey(item => new { item.OrganizationId, item.UserId });
+            configuration.Property(item => item.Version).IsConcurrencyToken();
             configuration.HasOne<Organization>()
                 .WithMany()
                 .HasForeignKey(item => item.OrganizationId)
@@ -174,6 +178,24 @@ public sealed class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(item => item.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<OrganizationInvitation>(configuration =>
+        {
+            configuration.ToTable("organization_invitations");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.Email).HasMaxLength(254).IsRequired();
+            configuration.Property(item => item.NormalizedEmail).HasMaxLength(254).IsRequired();
+            configuration.Property(item => item.TokenHash).HasMaxLength(64).IsRequired();
+            configuration.Property(item => item.EmailMessageId).HasMaxLength(100);
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<Organization>().WithMany().HasForeignKey(item => item.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.CreatedBy).OnDelete(DeleteBehavior.Restrict);
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.AcceptedByUserId).OnDelete(DeleteBehavior.Restrict).IsRequired(false);
+            configuration.HasIndex(item => item.TokenHash).IsUnique();
+            configuration.HasIndex(item => new { item.OrganizationId, item.NormalizedEmail }).IsUnique()
+                .HasFilter("\"RevokedAt\" IS NULL AND \"AcceptedAt\" IS NULL");
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
         });
 

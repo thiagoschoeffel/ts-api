@@ -43,6 +43,11 @@ public static class DependencyInjection
         services.AddScoped<IOrderQueryStore, OrderQueryStore>();
         services.AddScoped<IOperationsStore, OperationsStore>();
         services.AddScoped<IMembershipStore, MembershipStore>();
+        services.AddSingleton<IInvitationEmailSender>(new ResendInvitationEmailSender(new HttpClient
+        {
+            BaseAddress = new Uri(configuration["Resend:ApiBaseUrl"] ?? "https://api.resend.com/"),
+            Timeout = TimeSpan.FromSeconds(15),
+        }, configuration));
         services.AddScoped<IPlatformRegistryStore, PlatformRegistryStore>();
         services.AddScoped<ICommerceStore, CommerceStore>();
         services.AddScoped<ILogisticsStore, LogisticsStore>();

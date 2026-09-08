@@ -13,6 +13,9 @@ services:
       Authentication__MetadataAddress: http://identity:8080/realms/sabor-sante/.well-known/openid-configuration
       Authentication__Audience: ts-api
       Authentication__RequireHttpsMetadata: "false"
+      Resend__ApiKey: ${RESEND_API_KEY:-}
+      Resend__From: ${RESEND_FROM:-}
+      Resend__InvitationUrl: ${INVITATION_URL:-http://localhost:4173/convites/aceitar}
       WhatsApp__OrganizationId: ${WHATSAPP_ORGANIZATION_ID:-}
       WhatsApp__PhoneNumberId: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WhatsApp__BusinessPhoneNumber: ${WHATSAPP_BUSINESS_PHONE_NUMBER:-}

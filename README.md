@@ -123,10 +123,13 @@ POST /api/operations/packing/{orderId}
 POST /api/operations/packing/{orderId}/print-attempts
 GET  /api/session
 GET  /api/identity/session
+POST /api/identity/invitations/accept
 GET  /api/platform/access
 GET  /api/platform/organizations
 GET  /api/platform/organizations/{organizationId}
 GET  /api/platform/audit-events
+GET  /api/membership-invitations
+POST /api/membership-invitations
 GET  /api/attendance
 PUT  /api/attendance/conversations/{conversationId}/mode
 POST /api/attendance/conversations/{conversationId}/messages
@@ -150,6 +153,8 @@ dotnet run --project src/Ts.Api.Api -- bootstrap-platform-operator \
 ```
 
 O comando é idempotente para usuário/perfil ativo e registra o resultado em `platform_audit_events`. Produção deve executá-lo em ambiente administrativo controlado e exigir MFA do operador no provedor OIDC.
+
+Convites de membros são enviados pelo Resend. Configure `Resend:ApiKey`, `Resend:From` com um remetente de domínio verificado e `Resend:InvitationUrl` apontando para `/convites/aceitar` no host. A chave nunca é exposta ao frontend. O token é enviado apenas no link e somente seu hash SHA-256 é persistido; o aceite autenticado exige o mesmo claim `email`, é de uso único e cria a associação de forma transacional.
 
 Leituras aceitam qualquer associação ativa. Operações de Pedido, estoque e planejamento logístico aceitam `Owner`, `Administrator` e `Operator`; o registro de tentativa também aceita uma associação `DeliveryDriver`, sempre dentro da Organização ativa. Configuração de Catálogo, Produção, capacidade, Planos, restrições, Financeiro e cadastro de entregadores exige `Owner` ou `Administrator`. O `ActorId` não faz mais parte dos corpos HTTP: a autoria é sempre o usuário de plataforma resolvido pelo `sub` autenticado.
 
