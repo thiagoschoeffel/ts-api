@@ -34,6 +34,8 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
 builder.Services.AddScoped<HttpRequestContext>();
 builder.Services.AddScoped<IOrganizationContext>(provider => provider.GetRequiredService<HttpRequestContext>());
 builder.Services.AddScoped<ICurrentUserContext>(provider => provider.GetRequiredService<HttpRequestContext>());
+builder.Services.AddScoped<PlatformActorContext>();
+builder.Services.AddScoped<IPlatformActorContext>(provider => provider.GetRequiredService<PlatformActorContext>());
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -66,8 +68,21 @@ builder.Services.AddAuthorization(options =>
         .RequireAuthenticatedUser()
         .AddRequirements(new MembershipRoleRequirement(OrganizationRole.Owner,
             OrganizationRole.Administrator)));
+    options.AddPolicy(AuthorizationPolicies.PlatformRead, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.OrganizationsRead)));
+    options.AddPolicy(AuthorizationPolicies.PlatformOnboarding, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.OnboardingManage)));
+    options.AddPolicy(AuthorizationPolicies.PlatformAdminister, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.OrganizationsAdminister)));
+    options.AddPolicy(AuthorizationPolicies.PlatformAuditRead, policy => policy
+        .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.AuditRead)));
 });
 builder.Services.AddSingleton<IAuthorizationHandler, MembershipAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, PlatformCapabilityAuthorizationHandler>();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<CreateOfferHandler>();
@@ -101,6 +116,7 @@ builder.Services.AddScoped<GetPackingQueueHandler>();
 builder.Services.AddScoped<PackOrderHandler>();
 builder.Services.AddScoped<RecordLabelPrintHandler>();
 builder.Services.AddScoped<MembershipService>();
+builder.Services.AddScoped<PlatformRegistryService>();
 builder.Services.AddScoped<ConfigureDailyCapacityHandler>();
 builder.Services.AddScoped<GetDailyCapacityHandler>();
 builder.Services.AddScoped<PublishCompositionHandler>();
@@ -114,6 +130,12 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
+
+if (PlatformOperatorBootstrap.IsRequested(args))
+{
+    Environment.ExitCode = await PlatformOperatorBootstrap.ExecuteAsync(args, app.Services);
+    return;
+}
 
 app.UseMiddleware<RequestObservabilityMiddleware>();
 app.UseExceptionHandler();
@@ -150,8 +172,21 @@ app.MapPost("/api/telemetry/client-errors", (ClientErrorReport report, HttpReque
         ClientErrorReport.Sanitize(report.Message, 1000));
     return Results.Accepted();
 })
+    .WithApiContext(ApiContextKind.Business)
     .RequireAuthorization(AuthorizationPolicies.Read)
     .WithName("ReportClientError");
+
+app.MapPost("/api/identity/telemetry/client-errors", (ClientErrorReport report,
+    ILogger<Program> logger) =>
+{
+    logger.LogError("Erro do frontend {ErrorName} em {Source}: {Message}",
+        ClientErrorReport.Sanitize(report.Name, 120), ClientErrorReport.Sanitize(report.Source, 200),
+        ClientErrorReport.Sanitize(report.Message, 1000));
+    return Results.Accepted();
+})
+    .WithApiContext(ApiContextKind.Identity)
+    .RequireAuthorization()
+    .WithName("ReportIdentityClientError");
 
 app.MapApplicationEndpoints();
 app.MapWhatsAppWebhooks();

@@ -36,6 +36,8 @@ public sealed class AppDbContext : DbContext
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<PlatformUser> Users => Set<PlatformUser>();
     public DbSet<OrganizationMembership> OrganizationMemberships => Set<OrganizationMembership>();
+    public DbSet<PlatformOperatorGrant> PlatformOperatorGrants => Set<PlatformOperatorGrant>();
+    public DbSet<PlatformAuditEvent> PlatformAuditEvents => Set<PlatformAuditEvent>();
     public DbSet<CatalogOffer> CatalogOffers => Set<CatalogOffer>();
     public DbSet<ComponentType> ComponentTypes => Set<ComponentType>();
     public DbSet<CatalogAddon> CatalogAddons => Set<CatalogAddon>();
@@ -147,6 +149,7 @@ public sealed class AppDbContext : DbContext
             configuration.HasKey(item => item.Id);
             configuration.Property(item => item.Name).HasMaxLength(160).IsRequired();
             configuration.Property(item => item.Slug).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.Version).IsConcurrencyToken();
             configuration.HasIndex(item => item.Slug).IsUnique();
         });
 
@@ -172,6 +175,35 @@ public sealed class AppDbContext : DbContext
                 .HasForeignKey(item => item.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
             configuration.HasQueryFilter(item => item.OrganizationId == organizationContext.OrganizationId);
+        });
+
+        modelBuilder.Entity<PlatformOperatorGrant>(configuration =>
+        {
+            configuration.ToTable("platform_operator_grants");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.OperationalActor).HasMaxLength(200).IsRequired();
+            configuration.Property(item => item.Reason).HasMaxLength(1000).IsRequired();
+            configuration.Property(item => item.Version).IsConcurrencyToken();
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            configuration.HasIndex(item => new { item.UserId, item.Profile })
+                .IsUnique().HasFilter("\"RevokedAt\" IS NULL");
+        });
+
+        modelBuilder.Entity<PlatformAuditEvent>(configuration =>
+        {
+            configuration.ToTable("platform_audit_events");
+            configuration.HasKey(item => item.Id);
+            configuration.Property(item => item.ActorKind).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.Action).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.TargetType).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.Result).HasMaxLength(100).IsRequired();
+            configuration.Property(item => item.Reason).HasMaxLength(1000).IsRequired();
+            configuration.Property(item => item.CorrelationId).HasMaxLength(100).IsRequired();
+            configuration.HasOne<PlatformUser>().WithMany().HasForeignKey(item => item.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict).IsRequired(false);
+            configuration.HasIndex(item => new { item.OccurredAt, item.Id });
+            configuration.HasIndex(item => item.CorrelationId);
         });
 
         modelBuilder.Entity<AuditEvent>(configuration =>

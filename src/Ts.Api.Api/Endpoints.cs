@@ -28,10 +28,42 @@ public static class Endpoints
     public static IEndpointRouteBuilder MapApplicationEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet("/api/session", GetSessionAsync)
+            .WithApiContext(ApiContextKind.Identity)
             .RequireAuthorization()
             .WithName("GetSession");
 
-        var api = endpoints.MapGroup("/api").RequireAuthorization(AuthorizationPolicies.Read);
+        endpoints.MapGet("/api/identity/session", GetSessionAsync)
+            .WithApiContext(ApiContextKind.Identity)
+            .RequireAuthorization()
+            .WithName("GetIdentitySession");
+
+        var platform = endpoints.MapGroup("/api/platform")
+            .WithApiContext(ApiContextKind.Platform);
+        platform.MapGet("/access", (IPlatformActorContext actor) =>
+                TypedResults.Ok(new PlatformSession(actor.Profiles.Order().ToArray(),
+                    actor.Capabilities.Order().ToArray())))
+            .RequireAuthorization(AuthorizationPolicies.PlatformRead)
+            .WithName("GetPlatformAccess");
+        platform.MapGet("/organizations", (string? search, OrganizationLifecycleStatus? status,
+                int page, int pageSize, PlatformRegistryService service, CancellationToken token) =>
+                service.ListOrganizationsAsync(search, status, page == 0 ? 1 : page,
+                    pageSize == 0 ? 20 : pageSize, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformRead)
+            .WithName("GetPlatformOrganizations");
+        platform.MapGet("/organizations/{id:guid}", (Guid id, PlatformRegistryService service,
+                CancellationToken token) => service.GetOrganizationAsync(id, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformRead)
+            .WithName("GetPlatformOrganization");
+        platform.MapGet("/audit-events", (string? action, Guid? targetId, int page, int pageSize,
+                PlatformRegistryService service, CancellationToken token) =>
+                service.ListAuditAsync(action, targetId, page == 0 ? 1 : page,
+                    pageSize == 0 ? 20 : pageSize, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformAuditRead)
+            .WithName("GetPlatformAuditEvents");
+
+        var api = endpoints.MapGroup("/api")
+            .WithApiContext(ApiContextKind.Business)
+            .RequireAuthorization(AuthorizationPolicies.Read);
         api.MapGet("/memberships", (MembershipService service, CancellationToken token) => service.GetAsync(token))
             .RequireAuthorization(AuthorizationPolicies.Administer).WithName("GetMemberships");
         api.MapPost("/memberships", CreateMembershipAsync)
@@ -217,8 +249,10 @@ public static class Endpoints
             : memberships.Select(item => (Guid?)item.Id).FirstOrDefault();
         var organizations = memberships.Select(item => new SessionOrganization(
             item.Id, item.Name, item.Slug, item.Role, item.Id == activeOrganizationId)).ToArray();
+        var actor = httpContext.RequestServices.GetRequiredService<IPlatformActorContext>();
         return TypedResults.Ok(new SessionResponse(user.Id, user.DisplayName,
-            activeOrganizationId, organizations));
+            activeOrganizationId, organizations, new PlatformSession(
+                actor.Profiles.Order().ToArray(), actor.Capabilities.Order().ToArray())));
     }
 
     private static async Task<IResult> CreateOfferAsync(
@@ -822,4 +856,6 @@ public sealed record SessionOrganization(
     Guid Id, string Name, string Slug, OrganizationRole Role, bool IsActive);
 public sealed record SessionResponse(
     Guid UserId, string DisplayName, Guid? ActiveOrganizationId,
-    IReadOnlyCollection<SessionOrganization> Organizations);
+    IReadOnlyCollection<SessionOrganization> Organizations, PlatformSession Platform);
+public sealed record PlatformSession(
+    IReadOnlyCollection<string> Profiles, IReadOnlyCollection<string> Capabilities);
