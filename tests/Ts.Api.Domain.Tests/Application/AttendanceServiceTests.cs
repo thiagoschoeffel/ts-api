@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Ts.Api.Application.Attendance;
 using Ts.Api.Application.Common;
+using Ts.Api.Application.Organizations;
 using Ts.Api.Domain.Attendance;
 using Ts.Api.Infrastructure.Persistence;
 
@@ -88,14 +89,20 @@ public sealed class AttendanceServiceTests
         public Guid UserId { get; } = Guid.NewGuid();
         public string CorrelationId => "test";
     }
-    private sealed class ConfigurationFake : IWhatsAppConfiguration
+    private sealed class ConfigurationFake : IWhatsAppConnectionResolver
     {
-        public string PhoneNumberId => "phone-1"; public string BusinessPhoneNumber => "+551140002026";
-        public int FreeServiceMessageLimit => 1000; public int AutomationPauseAt => 970;
+        private static readonly WhatsAppRuntimeConnection Connection = new(Guid.NewGuid(), Guid.NewGuid(),
+            "phone-1", "+551140002026", "access", "secret", "verify", 1000, 970);
+        public Task<WhatsAppRuntimeConnection> GetCurrentAsync(CancellationToken token) => Task.FromResult(Connection);
+        public Task<WhatsAppRuntimeConnection?> ResolveWebhookAsync(Guid connectionId, CancellationToken token) =>
+            Task.FromResult<WhatsAppRuntimeConnection?>(Connection);
+        public Task<bool> TryRegisterWebhookAsync(WhatsAppRuntimeConnection connection, string externalEventId,
+            CancellationToken token) => Task.FromResult(true);
     }
     private sealed class CloudFake(Exception? exception = null) : IWhatsAppCloudClient
     {
-        public Task<WhatsAppSendResult> SendTextAsync(string phoneNumberId, string customerPhone, string text, CancellationToken token) =>
+        public Task<WhatsAppSendResult> SendTextAsync(string phoneNumberId, string customerPhone, string text,
+            string accessToken, CancellationToken token) =>
             exception is null
                 ? Task.FromResult(new WhatsAppSendResult("wamid.out", DateTimeOffset.UtcNow))
                 : Task.FromException<WhatsAppSendResult>(exception);

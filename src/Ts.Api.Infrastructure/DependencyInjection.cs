@@ -55,13 +55,16 @@ public static class DependencyInjection
         services.AddScoped<ICommerceStore, CommerceStore>();
         services.AddScoped<ILogisticsStore, LogisticsStore>();
         services.AddScoped<IAttendanceStore, AttendanceStore>();
+        services.AddScoped<IExternalIntegrationStore, ExternalIntegrationStore>();
+        services.AddSingleton<IIntegrationSecretProtector, IntegrationSecretProtector>();
+        services.AddScoped<IWhatsAppConnectionResolver, WhatsAppConnectionResolver>();
         services.AddSingleton(provider => new HttpClient
         {
             BaseAddress = new Uri(provider.GetRequiredService<IConfiguration>()["WhatsApp:GraphApiBaseUrl"] ?? "https://graph.facebook.com/v25.0/"),
             Timeout = TimeSpan.FromSeconds(15),
         });
         services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
-        services.AddSingleton<IWhatsAppConfiguration, WhatsAppConfiguration>();
+        services.AddScoped<IWhatsAppConnectionVerifier, WhatsAppCloudClient>();
         return services;
     }
 }

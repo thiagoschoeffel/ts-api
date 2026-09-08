@@ -17,6 +17,7 @@ services:
       Resend__From: ${RESEND_FROM:-}
       Resend__InvitationUrl: ${INVITATION_URL:-http://localhost:4173/convites/aceitar}
       Onboarding__InvitationTokenSecret: ${ONBOARDING_INVITATION_TOKEN_SECRET:-local-development-onboarding-token-secret}
+      IntegrationSecrets__EncryptionKey: ${INTEGRATION_SECRETS_ENCRYPTION_KEY:-bG9jYWwtZGV2ZWxvcG1lbnQta2V5LTMyLWJ5dGVzISE=}
       WhatsApp__OrganizationId: ${WHATSAPP_ORGANIZATION_ID:-}
       WhatsApp__PhoneNumberId: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WhatsApp__BusinessPhoneNumber: ${WHATSAPP_BUSINESS_PHONE_NUMBER:-}

@@ -80,6 +80,17 @@ public static class Endpoints
         platform.MapPost("/organizations/{id:guid}/reactivation", ReactivateOrganizationAsync)
             .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
             .WithName("ReactivateOrganization");
+        platform.MapGet("/organizations/{id:guid}/integrations", (Guid id,
+                ExternalIntegrationService service, CancellationToken token) => service.ListAsync(id, token))
+            .RequireAuthorization(AuthorizationPolicies.PlatformRead)
+            .WithName("GetOrganizationExternalIntegrations");
+        platform.MapPut("/organizations/{id:guid}/integrations/whatsapp", SaveWhatsAppIntegrationAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
+            .WithName("SaveOrganizationWhatsAppIntegration");
+        platform.MapPost("/organizations/{id:guid}/integrations/{connectionId:guid}/disable",
+                DisableExternalIntegrationAsync)
+            .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
+            .WithName("DisableOrganizationExternalIntegration");
         platform.MapGet("/audit-events", (string? action, Guid? targetId, int page, int pageSize,
                 PlatformRegistryService service, CancellationToken token) =>
                 service.ListAuditAsync(action, targetId, page == 0 ? 1 : page,
@@ -249,6 +260,17 @@ public static class Endpoints
         HttpContext context, PlatformLifecycleService service, CancellationToken token) =>
         TypedResults.Ok(await service.ChangeStatusAsync(id, OrganizationLifecycleStatus.Active,
             request.ExpectedVersion, request.Reason, context.TraceIdentifier, token));
+    private static async Task<IResult> SaveWhatsAppIntegrationAsync(Guid id,
+        SaveWhatsAppIntegrationRequest request, HttpContext context, ExternalIntegrationService service,
+        CancellationToken token) => TypedResults.Ok(await service.SaveWhatsAppAsync(id,
+            new(request.DisplayName, request.ExternalAccountId, request.PhoneNumberId,
+                request.BusinessPhoneNumber, request.AccessToken, request.AppSecret,
+                request.WebhookVerifyToken, request.FreeServiceMessageLimit,
+                request.AutomationPauseAt, request.ExpectedVersion), context.TraceIdentifier, token));
+    private static async Task<IResult> DisableExternalIntegrationAsync(Guid id, Guid connectionId,
+        ExternalIntegrationVersionRequest request, HttpContext context, ExternalIntegrationService service,
+        CancellationToken token) => TypedResults.Ok(await service.DisableAsync(id, connectionId,
+            request.ExpectedVersion, context.TraceIdentifier, token));
     private static async Task<IResult> CreatePlatformOnboardingAsync(PlatformOnboardingRequest request,
         HttpContext context, PlatformOnboardingService service, CancellationToken token)
     {
@@ -926,6 +948,11 @@ public sealed record PlatformOnboardingRequest(string Name, string Slug, string 
 public sealed record PlatformOnboardingRetryRequest(long ExpectedVersion);
 public sealed record SaasSubscriptionRequest(Guid PlanVersionId, long? ExpectedVersion);
 public sealed record OrganizationLifecycleRequest(long ExpectedVersion, string Reason);
+public sealed record SaveWhatsAppIntegrationRequest(string DisplayName, string ExternalAccountId,
+    string PhoneNumberId, string BusinessPhoneNumber, string? AccessToken, string? AppSecret,
+    string? WebhookVerifyToken, int FreeServiceMessageLimit = 1000,
+    int AutomationPauseAt = 970, long? ExpectedVersion = null);
+public sealed record ExternalIntegrationVersionRequest(long ExpectedVersion);
 
 public sealed record ConfigureDailyCapacityRequest(int TotalUnits, long ExpectedVersion);
 

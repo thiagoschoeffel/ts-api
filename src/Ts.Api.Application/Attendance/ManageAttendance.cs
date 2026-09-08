@@ -1,4 +1,5 @@
 using Ts.Api.Application.Common;
+using Ts.Api.Application.Organizations;
 using Ts.Api.Domain.Attendance;
 
 namespace Ts.Api.Application.Attendance;
@@ -57,28 +58,22 @@ public interface IAttendanceStore
 
 public interface IWhatsAppCloudClient
 {
-    Task<WhatsAppSendResult> SendTextAsync(string phoneNumberId, string customerPhone, string text, CancellationToken token);
-}
-
-public interface IWhatsAppConfiguration
-{
-    string PhoneNumberId { get; }
-    string BusinessPhoneNumber { get; }
-    int FreeServiceMessageLimit { get; }
-    int AutomationPauseAt { get; }
+    Task<WhatsAppSendResult> SendTextAsync(string phoneNumberId, string customerPhone, string text,
+        string accessToken, CancellationToken token);
 }
 
 public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClient cloud, IOrganizationContext organization,
-    ICurrentUserContext currentUser, IWhatsAppConfiguration configuration, TimeProvider timeProvider)
+    ICurrentUserContext currentUser, IWhatsAppConnectionResolver connections, TimeProvider timeProvider)
 {
     public async Task<AttendanceSnapshotResult> GetAsync(CancellationToken token)
     {
+        var runtime = await connections.GetCurrentAsync(token);
         var conversations = await store.GetConversationsAsync(token);
         var messages = await store.GetMessagesAsync(conversations.Select(x => x.Id).ToArray(), token);
         var names = await store.GetUserNamesAsync(conversations.Where(x => x.AssignedTo.HasValue).Select(x => x.AssignedTo!.Value).Distinct().ToArray(), token);
-        var phoneId = conversations.FirstOrDefault()?.BusinessPhoneNumberId ?? configuration.PhoneNumberId;
-        var phone = conversations.FirstOrDefault()?.BusinessPhoneNumber ?? configuration.BusinessPhoneNumber;
-        var quota = await GetOrCreateQuota(phoneId, phone, token);
+        var phoneId = conversations.FirstOrDefault()?.BusinessPhoneNumberId ?? runtime.PhoneNumberId;
+        var phone = conversations.FirstOrDefault()?.BusinessPhoneNumber ?? runtime.BusinessPhoneNumber;
+        var quota = await GetOrCreateQuota(phoneId, phone, runtime, token);
         return new(conversations.Select(c => Map(c, messages.Where(m => m.ConversationId == c.Id).ToArray(), c.AssignedTo is Guid id && names.TryGetValue(id, out var name) ? name : null)).ToArray(), Map(quota));
     }
 
@@ -97,7 +92,10 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
         if (existing is not null) return await Result(await store.FindConversationAsync(existing.ConversationId, token) ?? throw new ResourceNotFoundException("Conversa não encontrada."), token);
         var conversation = await store.FindConversationAsync(id, token) ?? throw new ResourceNotFoundException("Conversa não encontrada.");
         if (conversation.Mode != AttendanceMode.Human) throw new ConflictException("Assuma o atendimento antes de enviar uma mensagem manual.");
-        var quota = await GetOrCreateQuota(conversation.BusinessPhoneNumberId, conversation.BusinessPhoneNumber, token);
+        var runtime = await connections.GetCurrentAsync(token);
+        if (!string.Equals(conversation.BusinessPhoneNumberId, runtime.PhoneNumberId, StringComparison.Ordinal))
+            throw new ConflictException("A conversa pertence a outro ativo WhatsApp e não pode enviar pela conexão atual.");
+        var quota = await GetOrCreateQuota(conversation.BusinessPhoneNumberId, conversation.BusinessPhoneNumber, runtime, token);
         var message = await store.ExecuteSerializableAsync(async ct =>
         {
             quota.Reserve(false);
@@ -106,7 +104,8 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
             store.Add(reserved); await store.SaveChangesAsync(ct); return reserved;
         }, token);
         WhatsAppSendResult sent;
-        try { sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone, content.Trim(), token); }
+        try { sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone,
+            content.Trim(), runtime.AccessToken, token); }
         catch (WhatsAppProviderException exception) when (exception.Outcome == WhatsAppSendOutcome.Rejected)
         { message.MarkFailed(exception.Message); quota.Release(); await store.SaveChangesAsync(CancellationToken.None); throw; }
         catch (Exception exception)
@@ -121,10 +120,14 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
         var message = await store.FindMessageAsync(messageId, token) ?? throw new ResourceNotFoundException("Mensagem não encontrada.");
         if (message.ConversationId != conversationId || message.ProcessingStatus != MessageProcessingStatus.Failed) throw new ConflictException("Somente mensagens com falha podem ser repetidas.");
         var conversation = await store.FindConversationAsync(conversationId, token) ?? throw new ResourceNotFoundException("Conversa não encontrada.");
-        var quota = await GetOrCreateQuota(conversation.BusinessPhoneNumberId, conversation.BusinessPhoneNumber, token);
+        var runtime = await connections.GetCurrentAsync(token);
+        if (!string.Equals(conversation.BusinessPhoneNumberId, runtime.PhoneNumberId, StringComparison.Ordinal))
+            throw new ConflictException("A conversa pertence a outro ativo WhatsApp e não pode enviar pela conexão atual.");
+        var quota = await GetOrCreateQuota(conversation.BusinessPhoneNumberId, conversation.BusinessPhoneNumber, runtime, token);
         quota.Reserve(message.Origin == MessageOrigin.Automation); message.MarkProcessing(); await store.SaveChangesAsync(token);
         WhatsAppSendResult sent;
-        try { sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone, message.Content, token); }
+        try { sent = await cloud.SendTextAsync(conversation.BusinessPhoneNumberId, conversation.CustomerPhone,
+            message.Content, runtime.AccessToken, token); }
         catch (WhatsAppProviderException exception) when (exception.Outcome == WhatsAppSendOutcome.Rejected)
         { message.MarkFailed(exception.Message); quota.Release(); await store.SaveChangesAsync(CancellationToken.None); throw; }
         catch (Exception exception)
@@ -156,7 +159,8 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
     {
         var message = await store.FindMessageByExternalIdAsync(input.ExternalId, token); if (message is null) return;
         var conversation = await store.FindConversationAsync(message.ConversationId, token); if (conversation is null) return;
-        var quota = await GetOrCreateQuota(input.PhoneNumberId, conversation.BusinessPhoneNumber, token);
+        var runtime = await connections.GetCurrentAsync(token);
+        var quota = await GetOrCreateQuota(input.PhoneNumberId, conversation.BusinessPhoneNumber, runtime, token);
         if (input.Status.Equals("delivered", StringComparison.OrdinalIgnoreCase) && message.DeliveryStatus != MessageDeliveryStatus.Delivered) { message.MarkDelivered(); quota.Deliver(); }
         else if (input.Status.Equals("failed", StringComparison.OrdinalIgnoreCase) && message.DeliveryStatus is MessageDeliveryStatus.Reserved or MessageDeliveryStatus.Sent) { message.MarkFailed(input.FailureReason ?? "Falha informada pelo provedor."); quota.Release(); }
         if (quota.AutomationBlocked) foreach (var automated in (await store.GetConversationsAsync(token)).Where(x => x.Mode == AttendanceMode.Automated)) automated.DetectHumanReply();
@@ -176,11 +180,13 @@ public sealed class AttendanceService(IAttendanceStore store, IWhatsAppCloudClie
         return true;
     }, token);
 
-    private async Task<WhatsAppQuotaPeriod> GetOrCreateQuota(string phoneId, string phone, CancellationToken token)
+    private async Task<WhatsAppQuotaPeriod> GetOrCreateQuota(string phoneId, string phone,
+        WhatsAppRuntimeConnection runtime, CancellationToken token)
     {
         var now = timeProvider.GetUtcNow(); var period = new DateOnly(now.Year, now.Month, 1);
         var quota = await store.FindQuotaAsync(phoneId, period, token);
-        if (quota is null) { quota = WhatsAppQuotaPeriod.Create(organization.OrganizationId, phoneId, phone, period, configuration.FreeServiceMessageLimit, configuration.AutomationPauseAt); store.Add(quota); await store.SaveChangesAsync(token); }
+        if (quota is null) { quota = WhatsAppQuotaPeriod.Create(organization.OrganizationId, phoneId, phone, period,
+            runtime.FreeServiceMessageLimit, runtime.AutomationPauseAt); store.Add(quota); await store.SaveChangesAsync(token); }
         return quota;
     }
     private static string UnknownOutcomeReason(Exception exception) => exception is WhatsAppProviderException provider
