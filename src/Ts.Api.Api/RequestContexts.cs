@@ -38,10 +38,31 @@ public sealed class HttpRequestContext : IOrganizationContext, ICurrentUserConte
     }
 }
 
+public sealed class PlatformActorContext : IPlatformActorContext
+{
+    private Guid? userId;
+    private IReadOnlySet<string> profiles = new HashSet<string>();
+    private IReadOnlySet<string> capabilities = new HashSet<string>();
+
+    public bool IsAvailable => userId.HasValue && capabilities.Count > 0;
+    public Guid UserId => userId
+        ?? throw new InvalidOperationException("Nenhum ator da plataforma foi resolvido para a requisição.");
+    public IReadOnlySet<string> Profiles => profiles;
+    public IReadOnlySet<string> Capabilities => capabilities;
+
+    public void Set(Guid resolvedUserId, IEnumerable<PlatformOperatorProfile> resolvedProfiles)
+    {
+        userId = resolvedUserId;
+        profiles = resolvedProfiles.Select(item => item.ToString()).ToHashSet(StringComparer.Ordinal);
+        capabilities = resolvedProfiles.SelectMany(PlatformCapabilities.ForProfile)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+}
+
 public sealed class OrganizationContextMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext httpContext, HttpRequestContext requestContext,
-        AppDbContext database)
+        AppDbContext database, PlatformActorContext platformActor, TimeProvider timeProvider)
     {
         if (!httpContext.Request.Path.StartsWithSegments("/api"))
         {
@@ -76,7 +97,31 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
         }
 
         requestContext.SetUser(platformUser.Id, correlationId);
-        if (httpContext.Request.Path.Equals("/api/session", StringComparison.OrdinalIgnoreCase))
+        var endpoint = httpContext.GetEndpoint();
+        if (endpoint is null)
+        {
+            await next(httpContext);
+            return;
+        }
+        var contextMetadata = endpoint.Metadata.GetMetadata<ApiContextMetadata>();
+        if (contextMetadata is null)
+        {
+            await Results.Problem(statusCode: StatusCodes.Status500InternalServerError,
+                title: "Endpoint sem classificação de segurança",
+                detail: "O endpoint da API não informa o contexto de autorização obrigatório.")
+                .ExecuteAsync(httpContext);
+            return;
+        }
+        if (contextMetadata.Kind is ApiContextKind.Identity or ApiContextKind.Platform)
+        {
+            var activeProfiles = await database.PlatformOperatorGrants.AsNoTracking()
+                .Where(item => item.UserId == platformUser.Id && item.RevokedAt == null
+                    && (item.ExpiresAt == null || item.ExpiresAt > timeProvider.GetUtcNow()))
+                .Select(item => item.Profile)
+                .ToArrayAsync(httpContext.RequestAborted);
+            platformActor.Set(platformUser.Id, activeProfiles);
+        }
+        if (contextMetadata.Kind is ApiContextKind.Identity or ApiContextKind.Platform)
         {
             await next(httpContext);
             return;
@@ -120,4 +165,27 @@ public static class AuthorizationPolicies
     public const string Operate = "organization:operate";
     public const string Administer = "organization:administer";
     public const string MembershipRoleItem = "organization_membership_role";
+    public const string PlatformRead = "platform:read";
+    public const string PlatformOnboarding = "platform:onboarding";
+    public const string PlatformAdminister = "platform:administer";
+    public const string PlatformAuditRead = "platform:audit:read";
+}
+
+public static class PlatformCapabilities
+{
+    public const string OrganizationsRead = "platform.organizations.read";
+    public const string OnboardingManage = "platform.onboarding.manage";
+    public const string OrganizationsActivate = "platform.organizations.activate";
+    public const string OrganizationsAdminister = "platform.organizations.administer";
+    public const string AuditRead = "platform.audit.read";
+
+    public static IEnumerable<string> ForProfile(PlatformOperatorProfile profile) => profile switch
+    {
+        PlatformOperatorProfile.PlatformAdministrator =>
+            [OrganizationsRead, OnboardingManage, OrganizationsActivate, OrganizationsAdminister, AuditRead],
+        PlatformOperatorProfile.PlatformOnboardingOperator =>
+            [OrganizationsRead, OnboardingManage, OrganizationsActivate],
+        PlatformOperatorProfile.PlatformSupportReader => [OrganizationsRead, AuditRead],
+        _ => [],
+    };
 }

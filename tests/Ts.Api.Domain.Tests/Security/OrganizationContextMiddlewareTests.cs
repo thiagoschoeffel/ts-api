@@ -51,11 +51,36 @@ public sealed class OrganizationContextMiddlewareTests
     {
         var fixture = await Fixture.CreateAsync(withMembership: false);
 
-        await fixture.InvokeAsync(authenticated: true, organizationId: null, path: "/api/session");
+        await fixture.InvokeAsync(authenticated: true, organizationId: null, path: "/api/session",
+            kind: ApiContextKind.Identity);
 
         Assert.True(fixture.NextWasCalled);
         Assert.Equal(fixture.UserId, fixture.RequestContext.UserId);
         Assert.Throws<InvalidOperationException>(() => fixture.RequestContext.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Platform_context_does_not_require_an_organization()
+    {
+        var fixture = await Fixture.CreateAsync(withMembership: false);
+
+        await fixture.InvokeAsync(authenticated: true, organizationId: null,
+            path: "/api/platform/access", kind: ApiContextKind.Platform);
+
+        Assert.True(fixture.NextWasCalled);
+        Assert.Equal(fixture.UserId, fixture.RequestContext.UserId);
+    }
+
+    [Fact]
+    public async Task Rejects_an_api_endpoint_without_explicit_context_metadata()
+    {
+        var fixture = await Fixture.CreateAsync(withMembership: true);
+
+        await fixture.InvokeAsync(authenticated: true, fixture.OrganizationId,
+            path: "/api/unclassified", kind: null);
+
+        Assert.Equal(StatusCodes.Status500InternalServerError, fixture.HttpContext.Response.StatusCode);
+        Assert.False(fixture.NextWasCalled);
     }
 
     private sealed class Fixture
@@ -105,7 +130,8 @@ public sealed class OrganizationContextMiddlewareTests
                 organization.Id, user.Id, user.ExternalSubject);
         }
 
-        public async Task InvokeAsync(bool authenticated, Guid? organizationId, string path = "/api/orders")
+        public async Task InvokeAsync(bool authenticated, Guid? organizationId, string path = "/api/orders",
+            ApiContextKind? kind = ApiContextKind.Business)
         {
             HttpContext.Request.Path = path;
             HttpContext.Response.Body = new MemoryStream();
@@ -120,7 +146,12 @@ public sealed class OrganizationContextMiddlewareTests
                 HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
                     [new Claim("sub", Subject)], "test"));
             }
-            await middleware.InvokeAsync(HttpContext, RequestContext, database);
+            var metadata = kind.HasValue
+                ? new EndpointMetadataCollection(new ApiContextMetadata(kind.Value))
+                : new EndpointMetadataCollection();
+            HttpContext.SetEndpoint(new Endpoint(_ => Task.CompletedTask, metadata, "test"));
+            await middleware.InvokeAsync(HttpContext, RequestContext, database,
+                new PlatformActorContext(), TimeProvider.System);
         }
     }
 
