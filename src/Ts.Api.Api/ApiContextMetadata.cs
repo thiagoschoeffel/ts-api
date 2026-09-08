@@ -8,6 +8,7 @@ public enum ApiContextKind
 }
 
 public sealed record ApiContextMetadata(ApiContextKind Kind);
+public sealed record AllowUnregisteredIdentityMetadata;
 
 public static class ApiContextEndpointExtensions
 {
@@ -15,6 +16,16 @@ public static class ApiContextEndpointExtensions
         where TBuilder : IEndpointConventionBuilder
     {
         builder.WithMetadata(new ApiContextMetadata(kind));
+        return builder;
+    }
+}
+
+public static class IdentityRegistrationEndpointExtensions
+{
+    public static TBuilder AllowUnregisteredIdentity<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        builder.WithMetadata(new AllowUnregisteredIdentityMetadata());
         return builder;
     }
 }

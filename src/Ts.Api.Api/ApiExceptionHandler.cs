@@ -17,6 +17,7 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
         {
             ResourceNotFoundException => StatusCodes.Status404NotFound,
             ConflictException => StatusCodes.Status409Conflict,
+            PreconditionFailedException => StatusCodes.Status412PreconditionFailed,
             DbUpdateException => StatusCodes.Status409Conflict,
             DomainException => StatusCodes.Status422UnprocessableEntity,
             _ => StatusCodes.Status500InternalServerError,
@@ -44,6 +45,7 @@ public sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsSer
                 {
                     StatusCodes.Status404NotFound => "Recurso não encontrado",
                     StatusCodes.Status409Conflict => "Conflito de estado",
+                    StatusCodes.Status412PreconditionFailed => "Versão desatualizada",
                     StatusCodes.Status422UnprocessableEntity => "Regra de negócio inválida",
                     _ => "Erro interno",
                 },

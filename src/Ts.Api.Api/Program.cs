@@ -34,6 +34,7 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
 builder.Services.AddScoped<HttpRequestContext>();
 builder.Services.AddScoped<IOrganizationContext>(provider => provider.GetRequiredService<HttpRequestContext>());
 builder.Services.AddScoped<ICurrentUserContext>(provider => provider.GetRequiredService<HttpRequestContext>());
+builder.Services.AddScoped<IIdentityOrganizationScope>(provider => provider.GetRequiredService<HttpRequestContext>());
 builder.Services.AddScoped<PlatformActorContext>();
 builder.Services.AddScoped<IPlatformActorContext>(provider => provider.GetRequiredService<PlatformActorContext>());
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

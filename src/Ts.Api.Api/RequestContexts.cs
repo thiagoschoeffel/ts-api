@@ -6,7 +6,7 @@ using Ts.Api.Infrastructure.Persistence;
 
 namespace Ts.Api.Api;
 
-public sealed class HttpRequestContext : IOrganizationContext, ICurrentUserContext
+public sealed class HttpRequestContext : IOrganizationContext, ICurrentUserContext, IIdentityOrganizationScope
 {
     private Guid? organizationId;
     private Guid? userId;
@@ -35,6 +35,11 @@ public sealed class HttpRequestContext : IOrganizationContext, ICurrentUserConte
     {
         organizationId = resolvedOrganizationId;
         CorrelationId = correlationId;
+    }
+
+    public void SelectOrganizationForInvitation(Guid resolvedOrganizationId)
+    {
+        organizationId = resolvedOrganizationId;
     }
 }
 
@@ -87,17 +92,22 @@ public sealed class OrganizationContextMiddleware(RequestDelegate next)
             return;
         }
 
+        var endpoint = httpContext.GetEndpoint();
         var platformUser = await database.Users.IgnoreQueryFilters()
             .SingleOrDefaultAsync(item => item.ExternalSubject == subject && item.IsActive,
                 httpContext.RequestAborted);
         if (platformUser is null)
         {
+            if (endpoint?.Metadata.GetMetadata<AllowUnregisteredIdentityMetadata>() is not null)
+            {
+                await next(httpContext);
+                return;
+            }
             await Forbid(httpContext, "O usuário autenticado não está cadastrado na plataforma.");
             return;
         }
 
         requestContext.SetUser(platformUser.Id, correlationId);
-        var endpoint = httpContext.GetEndpoint();
         if (endpoint is null)
         {
             await next(httpContext);

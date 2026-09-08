@@ -13,6 +13,11 @@ public interface ICurrentUserContext
     string CorrelationId { get; }
 }
 
+public interface IIdentityOrganizationScope
+{
+    void SelectOrganizationForInvitation(Guid organizationId);
+}
+
 public interface IPlatformActorContext
 {
     bool IsAvailable { get; }
