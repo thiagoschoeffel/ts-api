@@ -655,9 +655,20 @@ public static class Endpoints
     }
 
     private static async Task<IResult> ListOrdersAsync(
+        DateOnly? from,
+        DateOnly? to,
+        string? search,
+        OrderListStatusGroup? statusGroup,
+        OrderListSort? sortBy,
+        OrderListSortDirection? sortDirection,
+        int? page,
+        int? pageSize,
         ListOrdersHandler handler,
         CancellationToken cancellationToken) =>
-        TypedResults.Ok(await handler.HandleAsync(cancellationToken));
+        TypedResults.Ok(await handler.HandleAsync(new OrderListQuery(
+            from, to, search, statusGroup ?? OrderListStatusGroup.All,
+            sortBy ?? OrderListSort.OperationalDate, sortDirection ?? OrderListSortDirection.Desc,
+            page ?? 1, pageSize ?? 20), cancellationToken));
 
     private static async Task<IResult> GetOrderAuthoringContextAsync(
         DateOnly? operationalDate,

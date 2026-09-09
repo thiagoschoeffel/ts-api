@@ -26,11 +26,11 @@ public sealed class QueryOrdersHandlerTests
                 configuration.Id, producible.Id, frozenOffer.Name, producible.Name, configuration.Presentation),
         ]);
         var result = await new ListOrdersHandler(new QueryStoreFake { Orders = [order] })
-            .HandleAsync(CancellationToken.None);
+            .HandleAsync(DefaultQuery(), CancellationToken.None);
 
-        Assert.Equal(5, result.Single().ItemCount);
-        Assert.Equal(2, result.Single().DailyCapacityUnits);
-        Assert.Equal(132m, result.Single().TotalAmount);
+        Assert.Equal(5, result.Items.Single().ItemCount);
+        Assert.Equal(2, result.Items.Single().DailyCapacityUnits);
+        Assert.Equal(132m, result.Items.Single().TotalAmount);
     }
 
     [Fact]
@@ -86,7 +86,9 @@ public sealed class QueryOrdersHandlerTests
         public IReadOnlyList<FrozenConfiguration> Configurations { get; init; } = [];
         public IReadOnlyList<FrozenLot> Lots { get; init; } = [];
 
-        public Task<IReadOnlyList<Order>> GetOrdersAsync(CancellationToken cancellationToken) => Task.FromResult(Orders);
+        public Task<OrderQueryPage> GetOrdersAsync(OrderListQuery query, CancellationToken cancellationToken) =>
+            Task.FromResult(new OrderQueryPage(Orders, Orders.Count,
+                Orders.GroupBy(item => item.Status).ToDictionary(group => group.Key, group => group.Count())));
         public Task<Order?> FindOrderDetailsAsync(Guid orderId, CancellationToken cancellationToken) =>
             Task.FromResult(Orders.SingleOrDefault(item => item.Id == orderId));
         public Task<IReadOnlyList<CatalogOffer>> GetActiveOffersAsync(CancellationToken cancellationToken) => Task.FromResult(Offers);
@@ -95,4 +97,7 @@ public sealed class QueryOrdersHandlerTests
         public Task<IReadOnlyList<FrozenLot>> GetSellableFrozenLotsAsync(DateOnly sellableOn, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<FrozenLot>>(Lots.Where(item => item.IsSellableOn(sellableOn)).ToArray());
     }
+
+    private static OrderListQuery DefaultQuery() => new(null, null, null,
+        OrderListStatusGroup.All, OrderListSort.OperationalDate, OrderListSortDirection.Desc, 1, 20);
 }

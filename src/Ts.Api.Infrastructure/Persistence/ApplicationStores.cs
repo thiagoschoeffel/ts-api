@@ -736,11 +736,61 @@ public sealed class OrderManagementStore(AppDbContext database) :
 
 public sealed class OrderQueryStore(AppDbContext database) : IOrderQueryStore
 {
-    public async Task<IReadOnlyList<Order>> GetOrdersAsync(CancellationToken cancellationToken) =>
-        await database.Orders.Include("_items")
-            .OrderByDescending(item => item.OperationalDate)
-            .ThenByDescending(item => item.Id)
-            .ToListAsync(cancellationToken);
+    public async Task<OrderQueryPage> GetOrdersAsync(OrderListQuery options, CancellationToken cancellationToken)
+    {
+        var period = database.Orders.AsNoTracking();
+        if (options.From.HasValue) period = period.Where(item => item.OperationalDate >= options.From.Value);
+        if (options.To.HasValue) period = period.Where(item => item.OperationalDate <= options.To.Value);
+        if (!string.IsNullOrWhiteSpace(options.Search))
+        {
+            var pattern = $"%{options.Search}%";
+            period = period.Where(item => EF.Functions.ILike(item.CustomerNameSnapshot, pattern)
+                || EF.Functions.ILike(item.Id.ToString(), pattern)
+                || EF.Functions.ILike(item.CustomerId.ToString(), pattern));
+        }
+
+        var statusCounts = await period.GroupBy(item => item.Status)
+            .Select(group => new { Status = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Status, item => item.Count, cancellationToken);
+        var filtered = options.StatusGroup switch
+        {
+            OrderListStatusGroup.Open => period.Where(item => item.Status == OrderStatus.Open),
+            OrderListStatusGroup.InProgress => period.Where(item => item.Status == OrderStatus.Confirmed
+                || item.Status == OrderStatus.InProduction || item.Status == OrderStatus.InPacking
+                || item.Status == OrderStatus.InDelivery),
+            OrderListStatusGroup.Completed => period.Where(item => item.Status == OrderStatus.Completed),
+            OrderListStatusGroup.Problems => period.Where(item => item.Status == OrderStatus.Cancelled
+                || item.Status == OrderStatus.DeliveryFailed),
+            _ => period,
+        };
+        var total = await filtered.CountAsync(cancellationToken);
+        var ascending = options.SortDirection == OrderListSortDirection.Asc;
+        IOrderedQueryable<Order> ordered = options.SortBy switch
+        {
+            OrderListSort.Customer => ascending
+                ? filtered.OrderBy(item => item.CustomerNameSnapshot)
+                : filtered.OrderByDescending(item => item.CustomerNameSnapshot),
+            OrderListSort.Status => ascending
+                ? filtered.OrderBy(item => item.Status)
+                : filtered.OrderByDescending(item => item.Status),
+            OrderListSort.ItemCount => ascending
+                ? filtered.OrderBy(item => EF.Property<ICollection<OrderItem>>(item, "_items").Sum(orderItem => orderItem.Quantity))
+                : filtered.OrderByDescending(item => EF.Property<ICollection<OrderItem>>(item, "_items").Sum(orderItem => orderItem.Quantity)),
+            OrderListSort.DailyCapacityUnits => ascending
+                ? filtered.OrderBy(item => EF.Property<ICollection<OrderItem>>(item, "_items").Where(orderItem => orderItem.FulfillmentMode == OfferFulfillmentMode.DailyProduction).Sum(orderItem => orderItem.Quantity))
+                : filtered.OrderByDescending(item => EF.Property<ICollection<OrderItem>>(item, "_items").Where(orderItem => orderItem.FulfillmentMode == OfferFulfillmentMode.DailyProduction).Sum(orderItem => orderItem.Quantity)),
+            OrderListSort.TotalAmount => ascending
+                ? filtered.OrderBy(item => EF.Property<ICollection<OrderItem>>(item, "_items").Sum(orderItem => orderItem.Quantity * orderItem.UnitPrice))
+                : filtered.OrderByDescending(item => EF.Property<ICollection<OrderItem>>(item, "_items").Sum(orderItem => orderItem.Quantity * orderItem.UnitPrice)),
+            _ => ascending
+                ? filtered.OrderBy(item => item.OperationalDate)
+                : filtered.OrderByDescending(item => item.OperationalDate),
+        };
+        var items = await ordered.ThenByDescending(item => item.Id)
+            .Skip((options.Page - 1) * options.PageSize).Take(options.PageSize)
+            .Include("_items").AsSplitQuery().ToArrayAsync(cancellationToken);
+        return new(items, total, statusCounts);
+    }
 
     public Task<Order?> FindOrderDetailsAsync(Guid orderId, CancellationToken cancellationToken) =>
         database.Orders
