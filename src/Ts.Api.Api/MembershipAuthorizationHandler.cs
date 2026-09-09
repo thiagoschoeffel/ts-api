@@ -54,16 +54,22 @@ public sealed class PlatformMfaRequirement(string claimType, string claimValue) 
         ? claimValue : throw new ArgumentException("O valor da claim MFA é obrigatório.", nameof(claimValue));
 }
 
-public sealed class PlatformMfaAuthorizationHandler : AuthorizationHandler<PlatformMfaRequirement>
+public sealed class PlatformMfaAuthorizationHandler(ILogger<PlatformMfaAuthorizationHandler> logger)
+    : AuthorizationHandler<PlatformMfaRequirement>
 {
     protected override Task HandleRequirementAsync(AuthorizationHandlerContext context,
         PlatformMfaRequirement requirement)
     {
-        var hasMfa = context.User.FindAll(requirement.ClaimType)
+        var claimValues = context.User.FindAll(requirement.ClaimType)
             .SelectMany(claim => claim.Value.Split([' ', '[', ']', ',', '"'],
                 StringSplitOptions.RemoveEmptyEntries))
-            .Any(value => string.Equals(value, requirement.ClaimValue, StringComparison.Ordinal));
+            .ToArray();
+        var hasMfa = claimValues.Any(value =>
+            string.Equals(value, requirement.ClaimValue, StringComparison.Ordinal));
         if (hasMfa) context.Succeed(requirement);
+        else logger.LogWarning(
+            "Platform MFA rejected. Claim type {ClaimType}, expected {ExpectedValue}, observed {ObservedValues}.",
+            requirement.ClaimType, requirement.ClaimValue, string.Join(',', claimValues));
         return Task.CompletedTask;
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Logging.Abstractions;
 using Ts.Api.Api;
 using Ts.Api.Application.Common;
 using Ts.Api.Domain.Organizations;
@@ -19,7 +20,8 @@ public sealed class PlatformAuthorizationTests
                 [new System.Security.Claims.Claim("amr", claimValue)], "test"));
         var context = new AuthorizationHandlerContext([requirement], principal, null);
 
-        await new PlatformMfaAuthorizationHandler().HandleAsync(context);
+        await new PlatformMfaAuthorizationHandler(
+            NullLogger<PlatformMfaAuthorizationHandler>.Instance).HandleAsync(context);
 
         Assert.True(context.HasSucceeded);
     }
@@ -37,7 +39,8 @@ public sealed class PlatformAuthorizationTests
             new System.Security.Claims.ClaimsIdentity(claims, "test"));
         var context = new AuthorizationHandlerContext([requirement], principal, null);
 
-        await new PlatformMfaAuthorizationHandler().HandleAsync(context);
+        await new PlatformMfaAuthorizationHandler(
+            NullLogger<PlatformMfaAuthorizationHandler>.Instance).HandleAsync(context);
 
         Assert.False(context.HasSucceeded);
     }

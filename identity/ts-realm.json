@@ -57,6 +57,17 @@
             "access.token.claim": "true",
             "id.token.claim": "true"
           }
+        },
+        {
+          "name": "amr",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-amr-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
         }
       ]
     }
@@ -75,7 +86,8 @@
       },
       "credentials": [
         { "type": "password", "value": "change-me", "temporary": true }
-      ]
+      ],
+      "requiredActions": ["CONFIGURE_TOTP"]
     }
   ]
 }
