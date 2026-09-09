@@ -164,7 +164,12 @@ dotnet run --project src/Ts.Api.Api -- bootstrap-platform-operator \
   --reason=<justificativa>
 ```
 
-O comando é idempotente para usuário/perfil ativo e registra o resultado em `platform_audit_events`. Produção deve executá-lo em ambiente administrativo controlado e exigir MFA do operador no provedor OIDC.
+O comando é idempotente para usuário/perfil ativo e registra o resultado em `platform_audit_events`.
+Produção deve executá-lo em ambiente administrativo controlado. Além do grant, todas as policies
+de plataforma exigem evidência de MFA no token: por padrão, a claim `amr` precisa conter `mfa`.
+Provedores com convenção diferente devem configurar `Authentication:PlatformMfaClaimType` e
+`Authentication:PlatformMfaClaimValue`; nunca use um valor que também seja emitido em login de
+fator único.
 
 Convites de membros são enviados pelo Resend. Configure `Resend:ApiKey`, `Resend:From` com um remetente de domínio verificado e `Resend:InvitationUrl` apontando para `/convites/aceitar` no host. A chave nunca é exposta ao frontend. O token é enviado apenas no link e somente seu hash SHA-256 é persistido; o aceite autenticado exige o mesmo claim `email`, é de uso único e cria a associação de forma transacional.
 
@@ -223,7 +228,7 @@ O reagendamento autoritativo é permitido somente em `Confirmed`, antes do iníc
 
 Quando há congelados, `FrozenDisposition` explicita o destino físico. Em `Confirmed`, unidades ainda não separadas devem usar `ReturnToStock` e geram `OrderReversal` no mesmo lote. Em `InProduction` ou `InPacking`, o retorno exige `FrozenReturnInspection` com embalagem, temperatura e rastreabilidade íntegras. Em `InDelivery` ou `DeliveryFailed`, retorno ao estoque vendável é proibido; deve-se registrar `Quarantine` ou `Discarded`. Como a saída já ocorreu na confirmação, quarentena e descarte são destinos físicos auditados e não debitam o lote uma segunda vez.
 
-O provedor escolhido é o Keycloak, configurado como servidor OIDC substituível por outro emissor compatível. O `compose.yaml` fixa a versão local e importa um realm mínimo; produção deve usar HTTPS, credenciais próprias, persistência administrada e os valores `Authentication:Authority`/`Audience` do ambiente. Chamadas anônimas recebem `401`; identidade desconhecida, associação ausente/inativa e tentativa cross-tenant recebem `403`.
+O provedor escolhido é o Keycloak, configurado como servidor OIDC substituível por outro emissor compatível. O `compose.yaml` fixa a versão local e importa um realm mínimo; produção deve usar HTTPS, credenciais próprias, persistência administrada e os valores `Authentication:Authority`/`Audience` do ambiente. O realm deve emitir a evidência configurada somente depois de autenticação multifator; sem ela, mesmo um usuário com grant global recebe `403` nas APIs de plataforma. Chamadas anônimas recebem `401`; identidade desconhecida, associação ausente/inativa e tentativa cross-tenant recebem `403`.
 
 ## Executar com Docker
 

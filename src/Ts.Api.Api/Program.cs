@@ -54,6 +54,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         options.RequireHttpsMetadata = builder.Configuration.GetValue("Authentication:RequireHttpsMetadata", true);
         options.MapInboundClaims = false;
     });
+var platformMfaClaimType = builder.Configuration["Authentication:PlatformMfaClaimType"] ?? "amr";
+var platformMfaClaimValue = builder.Configuration["Authentication:PlatformMfaClaimValue"] ?? "mfa";
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(AuthorizationPolicies.Read, policy => policy
@@ -71,18 +73,23 @@ builder.Services.AddAuthorization(options =>
             OrganizationRole.Administrator)));
     options.AddPolicy(AuthorizationPolicies.PlatformRead, policy => policy
         .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformMfaRequirement(platformMfaClaimType, platformMfaClaimValue))
         .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.OrganizationsRead)));
     options.AddPolicy(AuthorizationPolicies.PlatformOnboarding, policy => policy
         .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformMfaRequirement(platformMfaClaimType, platformMfaClaimValue))
         .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.OnboardingManage)));
     options.AddPolicy(AuthorizationPolicies.PlatformAdminister, policy => policy
         .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformMfaRequirement(platformMfaClaimType, platformMfaClaimValue))
         .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.OrganizationsAdminister)));
     options.AddPolicy(AuthorizationPolicies.PlatformAuditRead, policy => policy
         .RequireAuthenticatedUser()
+        .AddRequirements(new PlatformMfaRequirement(platformMfaClaimType, platformMfaClaimValue))
         .AddRequirements(new PlatformCapabilityRequirement(PlatformCapabilities.AuditRead)));
 });
 builder.Services.AddSingleton<IAuthorizationHandler, MembershipAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, PlatformMfaAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler, PlatformCapabilityAuthorizationHandler>();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);

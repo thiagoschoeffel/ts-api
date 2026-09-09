@@ -45,3 +45,25 @@ public sealed class PlatformCapabilityAuthorizationHandler(IPlatformActorContext
         return Task.CompletedTask;
     }
 }
+
+public sealed class PlatformMfaRequirement(string claimType, string claimValue) : IAuthorizationRequirement
+{
+    public string ClaimType { get; } = !string.IsNullOrWhiteSpace(claimType)
+        ? claimType : throw new ArgumentException("O tipo da claim MFA é obrigatório.", nameof(claimType));
+    public string ClaimValue { get; } = !string.IsNullOrWhiteSpace(claimValue)
+        ? claimValue : throw new ArgumentException("O valor da claim MFA é obrigatório.", nameof(claimValue));
+}
+
+public sealed class PlatformMfaAuthorizationHandler : AuthorizationHandler<PlatformMfaRequirement>
+{
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context,
+        PlatformMfaRequirement requirement)
+    {
+        var hasMfa = context.User.FindAll(requirement.ClaimType)
+            .SelectMany(claim => claim.Value.Split([' ', '[', ']', ',', '"'],
+                StringSplitOptions.RemoveEmptyEntries))
+            .Any(value => string.Equals(value, requirement.ClaimValue, StringComparison.Ordinal));
+        if (hasMfa) context.Succeed(requirement);
+        return Task.CompletedTask;
+    }
+}
