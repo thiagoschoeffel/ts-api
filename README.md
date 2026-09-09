@@ -327,3 +327,13 @@ PostgreSQL 17 real, constrói a imagem e guarda o publish imutável. Em deploy,
 defina `ConnectionStrings__Database` e execute `./scripts/apply-migrations.sh`
 uma única vez antes das novas réplicas. O procedimento completo e o rollback
 estão em `../ts-host/docs/OPERACAO_V1.md`.
+
+O `Dockerfile` também oferece o target administrativo `migrations` para
+plataformas de deploy baseadas em containers. Ele restaura a versão fixada do
+`dotnet-ef`, aplica a cadeia pendente e encerra; o target final padrão continua
+sendo `runtime` e não contém o SDK nem ferramentas administrativas:
+
+```bash
+docker build --target migrations -t ts-api-migrations .
+docker run --rm --env-file .env.production ts-api-migrations
+```
