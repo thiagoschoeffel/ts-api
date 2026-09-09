@@ -46,6 +46,35 @@ public sealed class ManageMenusHandlerTests
     }
 
     [Fact]
+    public async Task UpdatingDraftPreservesMenuChildrenAndAdvancesVersion()
+    {
+        var organizationId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString(), new InMemoryDatabaseRoot()).Options;
+        await using var database = new AppDbContext(options, new OrganizationContext(organizationId));
+        var offer = CatalogOffer.Create(organizationId, "Prato do dia", OfferFulfillmentMode.DailyProduction,
+            basePrice: 30, requiresMenuChoice: true);
+        var producible = ProducibleItem.Create(organizationId, "Estrogonofe");
+        database.AddRange(offer, producible); await database.SaveChangesAsync();
+        var context = new OrganizationContext(organizationId);
+        var service = new MenuService(new MenuStore(database), context, context, new FixedClock(DateTimeOffset.UtcNow));
+        var date = new DateOnly(2026, 9, 9);
+        var draft = await service.SaveAsync(Menu(date, offer.Id, producible.Id, 30), CancellationToken.None);
+        var optionId = Assert.Single(draft.Options).Id;
+        var menuOfferId = Assert.Single(draft.Offers).Id;
+
+        var updated = await service.SaveAsync(Menu(date, offer.Id, producible.Id, 19.50m) with
+        {
+            ExpectedVersion = draft.Version
+        }, CancellationToken.None);
+
+        Assert.Equal(draft.Version + 1, updated.Version);
+        Assert.Equal(optionId, Assert.Single(updated.Options).Id);
+        Assert.Equal(menuOfferId, Assert.Single(updated.Offers).Id);
+        Assert.Equal(19.50m, Assert.Single(updated.Offers).EffectivePrice);
+    }
+
+    [Fact]
     public async Task ImportReportsInvalidReferencesAndDoesNotPartiallyPersist()
     {
         var organizationId = Guid.NewGuid();

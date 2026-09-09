@@ -189,11 +189,6 @@ public sealed class MenuStore(AppDbContext database) : IMenuStore
     public Task<WeeklyMenuPlan?> FindWeeklyPlanAsync(DateOnly weekStart, CancellationToken token) =>
         database.WeeklyMenuPlans.SingleOrDefaultAsync(x => x.WeekStart == weekStart, token);
     public void Add(object entity) => database.Add(entity);
-    public void RemoveMenuChildren(DailyMenu menu)
-    {
-        database.DailyMenuOptions.RemoveRange(menu.Options);
-        database.DailyMenuOffers.RemoveRange(menu.Offers);
-    }
     public Task SaveChangesAsync(CancellationToken token) => database.SaveChangesAsync(token);
 }
 

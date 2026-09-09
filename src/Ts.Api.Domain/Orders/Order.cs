@@ -46,6 +46,12 @@ public sealed class Order : ITenantOwned
     public string? FulfillmentPostalCode { get; private set; }
     public string? FulfillmentReference { get; private set; }
     public string? DeliveryWindow { get; private set; }
+    public string PaymentCondition { get; private set; } = "cash";
+    public string PaymentMethod { get; private set; } = "pix";
+    public DateOnly? PaymentDueDate { get; private set; }
+    public decimal DraftDeliveryFee { get; private set; }
+    public decimal DraftDiscountAmount { get; private set; }
+    public string? DraftDiscountReason { get; private set; }
     public DateTimeOffset? FulfillmentFrozenAt { get; private set; }
     public DateOnly OperationalDate { get; private set; }
     public OrderStatus Status { get; private set; }
@@ -74,7 +80,8 @@ public sealed class Order : ITenantOwned
         IReadOnlyCollection<OrderItemDefinition> items,
         string? creationIdempotencyKey = null,
         string? customerNameSnapshot = null,
-        OrderFulfillmentSnapshotDefinition? fulfillment = null)
+        OrderFulfillmentSnapshotDefinition? fulfillment = null,
+        OrderFinancialTermsDefinition? financialTerms = null)
     {
         if (organizationId == Guid.Empty)
         {
@@ -98,6 +105,7 @@ public sealed class Order : ITenantOwned
         order.CustomerNameSnapshot = NormalizeCustomerName(customerId, customerNameSnapshot);
         order.ApplyFulfillment(fulfillment);
         order.ReplaceItems(items);
+        order.ApplyFinancialTerms(financialTerms);
 
         return order;
     }
@@ -108,7 +116,8 @@ public sealed class Order : ITenantOwned
         IReadOnlyCollection<OrderItemDefinition> items,
         string idempotencyKey,
         string? customerNameSnapshot = null,
-        OrderFulfillmentSnapshotDefinition? fulfillment = null)
+        OrderFulfillmentSnapshotDefinition? fulfillment = null,
+        OrderFinancialTermsDefinition? financialTerms = null)
     {
         if (Status != OrderStatus.Open)
         {
@@ -130,6 +139,7 @@ public sealed class Order : ITenantOwned
         ApplyFulfillment(fulfillment);
         OperationalDate = operationalDate;
         ReplaceItems(items);
+        ApplyFinancialTerms(financialTerms);
         LastModificationIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
         Version++;
     }
@@ -247,7 +257,7 @@ public sealed class Order : ITenantOwned
         var amountDue = beforeFinancialCredit - financialCreditApplied;
         if (amountDue > 0)
         {
-            _charges.Add(new OrderCharge(OrganizationId, Id, amountDue, OperationalDate, confirmedAt));
+            _charges.Add(new OrderCharge(OrganizationId, Id, amountDue, PaymentDueDate ?? OperationalDate, confirmedAt));
         }
 
         _confirmationAudits.Add(new OrderConfirmationAudit(
@@ -261,6 +271,29 @@ public sealed class Order : ITenantOwned
         FulfillmentFrozenAt = confirmedAt;
         ConfirmationIdempotencyKey = normalizedKey;
         Version++;
+    }
+
+    private void ApplyFinancialTerms(OrderFinancialTermsDefinition? value)
+    {
+        value ??= new("cash", "pix", null, 0, 0, null);
+        var condition = value.PaymentCondition?.Trim().ToLowerInvariant() ?? "";
+        var method = value.PaymentMethod?.Trim().ToLowerInvariant() ?? "";
+        if (condition is not ("cash" or "on-delivery" or "deferred")
+            || method is not ("pix" or "cash" or "credit-card" or "debit-card" or "bank-transfer")
+            || condition == "deferred" && value.PaymentDueDate is null
+            || condition != "deferred" && value.PaymentDueDate is not null
+            || value.PaymentDueDate < OperationalDate
+            || value.DeliveryFee < 0 || value.DiscountAmount < 0
+            || value.DiscountAmount > TotalAmount + value.DeliveryFee
+            || value.DiscountAmount > 0 && string.IsNullOrWhiteSpace(value.DiscountReason)
+            || value.DiscountReason?.Trim().Length > 500)
+            throw new DomainException("As condições financeiras do pedido são inválidas.");
+        PaymentCondition = condition;
+        PaymentMethod = method;
+        PaymentDueDate = value.PaymentDueDate;
+        DraftDeliveryFee = decimal.Round(value.DeliveryFee, 2);
+        DraftDiscountAmount = decimal.Round(value.DiscountAmount, 2);
+        DraftDiscountReason = value.DiscountAmount > 0 ? value.DiscountReason!.Trim() : null;
     }
 
     public void TransitionStatus(
@@ -548,3 +581,11 @@ public sealed record OrderFulfillmentSnapshotDefinition(
     string? PostalCode = null,
     string? Reference = null,
     string? DeliveryWindow = null);
+
+public sealed record OrderFinancialTermsDefinition(
+    string PaymentCondition,
+    string PaymentMethod,
+    DateOnly? PaymentDueDate,
+    decimal DeliveryFee,
+    decimal DiscountAmount,
+    string? DiscountReason);

@@ -34,7 +34,7 @@ public sealed class DailyMenu : ITenantOwned
     {
         if (expectedVersion != Version) throw new DomainException("O cardápio foi alterado por outra pessoa.");
         if (options.Count == 0 || offers.Count == 0) throw new DomainException("O cardápio deve possuir opções e ofertas.");
-        _options.Clear(); _offers.Clear(); ReplaceChildren(options, offers); UpdatedAt = now; Version++;
+        ReplaceChildren(options, offers); UpdatedAt = now; Version++;
     }
     public void Publish(DateTimeOffset now, long expectedVersion)
     {
@@ -43,12 +43,31 @@ public sealed class DailyMenu : ITenantOwned
     }
     private void ReplaceChildren(IEnumerable<DailyMenuOptionDefinition> options, IEnumerable<DailyMenuOfferDefinition> offers)
     {
-        foreach (var option in options) _options.Add(DailyMenuOption.Create(OrganizationId, Id, option));
-        foreach (var offer in offers) _offers.Add(DailyMenuOffer.Create(OrganizationId, Id, offer));
-        if (_options.Select(x => x.Category.ToUpperInvariant()).Distinct().Count() != _options.Count)
+        var optionDefinitions = options.ToArray();
+        var offerDefinitions = offers.ToArray();
+        if (optionDefinitions.Select(x => x.Category?.Trim() ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count() != optionDefinitions.Length)
             throw new DomainException("As categorias do cardápio não podem se repetir.");
-        if (_offers.Select(x => x.OfferId).Distinct().Count() != _offers.Count || _offers.Select(x => x.DisplayOrder).Distinct().Count() != _offers.Count)
+        if (offerDefinitions.Select(x => x.OfferId).Distinct().Count() != offerDefinitions.Length
+            || offerDefinitions.Select(x => x.DisplayOrder).Distinct().Count() != offerDefinitions.Length)
             throw new DomainException("Ofertas e ordens do cardápio não podem se repetir.");
+
+        var requestedCategories = optionDefinitions.Select(x => x.Category?.Trim() ?? "").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _options.RemoveAll(x => !requestedCategories.Contains(x.Category));
+        foreach (var option in optionDefinitions)
+        {
+            var existing = _options.SingleOrDefault(x => string.Equals(x.Category, option.Category?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (existing is null) _options.Add(DailyMenuOption.Create(OrganizationId, Id, option));
+            else existing.Update(option);
+        }
+
+        var requestedOfferIds = offerDefinitions.Select(x => x.OfferId).ToHashSet();
+        _offers.RemoveAll(x => !requestedOfferIds.Contains(x.OfferId));
+        foreach (var offer in offerDefinitions)
+        {
+            var existing = _offers.SingleOrDefault(x => x.OfferId == offer.OfferId);
+            if (existing is null) _offers.Add(DailyMenuOffer.Create(OrganizationId, Id, offer));
+            else existing.Update(offer);
+        }
     }
 }
 
@@ -65,6 +84,11 @@ public sealed class DailyMenuOption : ITenantOwned
     public MenuAvailability Availability { get; private set; }
     internal static DailyMenuOption Create(Guid organizationId, Guid menuId, DailyMenuOptionDefinition value) => value.ProducibleItemId == Guid.Empty || !Enum.IsDefined(value.Availability)
         ? throw new DomainException("A opção do cardápio é inválida.") : new(organizationId, menuId, value);
+    internal void Update(DailyMenuOptionDefinition value)
+    {
+        if (value.ProducibleItemId == Guid.Empty || !Enum.IsDefined(value.Availability)) throw new DomainException("A opção do cardápio é inválida.");
+        Category = Required(value.Category); ProducibleItemId = value.ProducibleItemId; Availability = value.Availability;
+    }
     private static string Required(string value) { var result = value?.Trim() ?? ""; return result.Length is > 0 and <= 100 ? result : throw new DomainException("A categoria do cardápio é inválida."); }
 }
 
@@ -83,6 +107,12 @@ public sealed class DailyMenuOffer : ITenantOwned
     internal static DailyMenuOffer Create(Guid organizationId, Guid menuId, DailyMenuOfferDefinition value) =>
         value.OfferId == Guid.Empty || value.EffectivePrice < 0 || value.DisplayOrder <= 0 || !Enum.IsDefined(value.Availability)
             ? throw new DomainException("A oferta do cardápio é inválida.") : new(organizationId, menuId, value);
+    internal void Update(DailyMenuOfferDefinition value)
+    {
+        if (value.OfferId != OfferId || value.EffectivePrice < 0 || value.DisplayOrder <= 0 || !Enum.IsDefined(value.Availability))
+            throw new DomainException("A oferta do cardápio é inválida.");
+        EffectivePrice = decimal.Round(value.EffectivePrice, 2); Availability = value.Availability; DisplayOrder = value.DisplayOrder;
+    }
 }
 
 public sealed record DailyMenuOptionDefinition(string Category, Guid ProducibleItemId, MenuAvailability Availability);

@@ -10,6 +10,7 @@ namespace Ts.Api.Application.Commerce;
 
 public sealed record AddressInput(string Label, string Street, string? Number, string? Complement,
     string? Neighborhood, string? City, string? State, string? PostalCode, string? ReferencePoint);
+public sealed record QuickCustomerInput(string Name, string Phone);
 public sealed record CustomerInput(string Name, string Phone, bool IsActive, string? Notes,
     string? PreferredDeliveryDriverId, string? PreferredPaymentCondition, string? PreferredPaymentMethod,
     IReadOnlyCollection<AddressInput> Addresses, IReadOnlyCollection<string> Preferences,
@@ -136,6 +137,19 @@ public sealed class CommerceService(ICommerceStore store, IOrganizationContext o
         foreach (var x in input.Preferences) store.Add(CustomerPreference.Create(organization.OrganizationId, customer.Id, x));
         foreach (var x in input.DietaryRestrictions) store.Add(CustomerDietaryRestriction.Create(organization.OrganizationId, customer.Id, x));
         await store.SaveAsync(token); return customer.Id;
+    }
+
+    public Task<Guid> CreateQuickCustomerAsync(QuickCustomerInput input, CancellationToken token) =>
+        SaveCustomerAsync(null, new CustomerInput(input.Name, input.Phone, true, null, null, null, null, [], [], [], null), token);
+
+    public async Task<Guid> AddCustomerAddressAsync(Guid customerId, AddressInput input, CancellationToken token)
+    {
+        _ = await store.CustomerAsync(customerId, token) ?? throw new ResourceNotFoundException("Cliente não encontrado.");
+        var address = CustomerAddress.Create(organization.OrganizationId, customerId, input.Label, input.Street,
+            input.Number, input.Complement, input.Neighborhood, input.City, input.State, input.PostalCode, input.ReferencePoint);
+        store.Add(address);
+        await store.SaveAsync(token);
+        return address.Id;
     }
 
     public async Task<Guid> SavePlanAsync(Guid? id, PlanInput input, CancellationToken token)

@@ -637,6 +637,11 @@ public sealed class AppDbContext : DbContext
             configuration.Property(item => item.FulfillmentPostalCode).HasMaxLength(20);
             configuration.Property(item => item.FulfillmentReference).HasMaxLength(300);
             configuration.Property(item => item.DeliveryWindow).HasMaxLength(80);
+            configuration.Property(item => item.PaymentCondition).HasMaxLength(30).HasDefaultValue("cash").IsRequired();
+            configuration.Property(item => item.PaymentMethod).HasMaxLength(30).HasDefaultValue("pix").IsRequired();
+            configuration.Property(item => item.DraftDeliveryFee).HasPrecision(12, 2);
+            configuration.Property(item => item.DraftDiscountAmount).HasPrecision(12, 2);
+            configuration.Property(item => item.DraftDiscountReason).HasMaxLength(500);
             configuration.HasKey(item => item.Id);
             configuration.HasAlternateKey(item => new { item.OrganizationId, item.Id });
             configuration.HasOne<Organization>()

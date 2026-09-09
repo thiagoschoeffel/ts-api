@@ -185,6 +185,12 @@ public static class Endpoints
         api.MapPost("/orders", CreateOrderAsync)
             .RequireAuthorization(AuthorizationPolicies.Operate)
             .WithName("CreateOrder");
+        api.MapPost("/orders/customers/quick", CreateQuickCustomerAsync)
+            .RequireAuthorization(AuthorizationPolicies.Operate)
+            .WithName("CreateQuickCustomerForOrder");
+        api.MapPost("/orders/customers/{customerId:guid}/addresses", AddCustomerAddressAsync)
+            .RequireAuthorization(AuthorizationPolicies.Operate)
+            .WithName("AddCustomerAddressForOrder");
         api.MapGet("/orders", ListOrdersAsync)
             .WithName("ListOrders");
         api.MapGet("/orders/authoring-context", GetOrderAuthoringContextAsync)
@@ -620,7 +626,8 @@ public static class Endpoints
                 request.CustomerName,
                 request.Fulfillment is null ? null : new OrderFulfillmentInput(
                     request.Fulfillment.Type, request.Fulfillment.Phone,
-                    request.Fulfillment.AddressId, request.Fulfillment.DeliveryWindow)),
+                    request.Fulfillment.AddressId, request.Fulfillment.DeliveryWindow),
+                MapOrderFinancial(request.Financial)),
             cancellationToken);
         return TypedResults.Created($"/api/orders/{result.Id}", result);
     }
@@ -649,7 +656,8 @@ public static class Endpoints
                 request.CustomerName,
                 request.Fulfillment is null ? null : new OrderFulfillmentInput(
                     request.Fulfillment.Type, request.Fulfillment.Phone,
-                    request.Fulfillment.AddressId, request.Fulfillment.DeliveryWindow)),
+                    request.Fulfillment.AddressId, request.Fulfillment.DeliveryWindow),
+                MapOrderFinancial(request.Financial)),
             cancellationToken);
         return TypedResults.Ok(result);
     }
@@ -805,6 +813,10 @@ public static class Endpoints
         TypedResults.Ok(await service.GetAsync(token));
     private static async Task<IResult> CreateCustomerAsync(CustomerInput request, CommerceService service, CancellationToken token)
     { var id = await service.SaveCustomerAsync(null, request, token); return TypedResults.Created($"/api/customers/{id}", new { id }); }
+    private static async Task<IResult> CreateQuickCustomerAsync(QuickCustomerInput request, CommerceService service, CancellationToken token)
+    { var id = await service.CreateQuickCustomerAsync(request, token); return TypedResults.Created($"/api/customers/{id}", new { id }); }
+    private static async Task<IResult> AddCustomerAddressAsync(Guid customerId, AddressInput request, CommerceService service, CancellationToken token)
+    { var id = await service.AddCustomerAddressAsync(customerId, request, token); return TypedResults.Created($"/api/customers/{customerId}/addresses/{id}", new { id }); }
     private static async Task<IResult> UpdateCustomerAsync(Guid id, CustomerInput request, CommerceService service, CancellationToken token)
     { await service.SaveCustomerAsync(id, request, token); return TypedResults.NoContent(); }
     private static async Task<IResult> CreatePlanAsync(PlanInput request, CommerceService service, CancellationToken token)
@@ -830,6 +842,11 @@ public static class Endpoints
         item.UnitPrice,
         item.FrozenConfigurationId,
         item.ProducibleItemId);
+
+    private static OrderFinancialTermsInput? MapOrderFinancial(OrderFinancialTermsRequest? financial) => financial is null
+        ? null
+        : new(financial.PaymentCondition, financial.PaymentMethod, financial.PaymentDueDate,
+            financial.DeliveryFee, financial.DiscountAmount, financial.DiscountReason);
 
     private static (string? Value, IResult? Error) ReadIdempotencyKey(HttpContext httpContext)
     {
@@ -920,7 +937,8 @@ public sealed record CreateOrderRequest(
     DateOnly OperationalDate,
     IReadOnlyCollection<OrderItemRequest> Items,
     string? CustomerName = null,
-    OrderFulfillmentRequest? Fulfillment = null);
+    OrderFulfillmentRequest? Fulfillment = null,
+    OrderFinancialTermsRequest? Financial = null);
 
 public sealed record EditOrderRequest(
     Guid CustomerId,
@@ -928,7 +946,16 @@ public sealed record EditOrderRequest(
     IReadOnlyCollection<OrderItemRequest> Items,
     long ExpectedVersion,
     string? CustomerName = null,
-    OrderFulfillmentRequest? Fulfillment = null);
+    OrderFulfillmentRequest? Fulfillment = null,
+    OrderFinancialTermsRequest? Financial = null);
+
+public sealed record OrderFinancialTermsRequest(
+    string PaymentCondition,
+    string PaymentMethod,
+    DateOnly? PaymentDueDate,
+    decimal DeliveryFee = 0,
+    decimal DiscountAmount = 0,
+    string? DiscountReason = null);
 
 public sealed record OrderFulfillmentRequest(
     OrderFulfillmentType Type,

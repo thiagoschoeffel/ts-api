@@ -16,7 +16,8 @@ public sealed record CreateOrderCommand(
     IReadOnlyCollection<OrderItemInput> Items,
     string IdempotencyKey,
     string? CustomerName = null,
-    OrderFulfillmentInput? Fulfillment = null);
+    OrderFulfillmentInput? Fulfillment = null,
+    OrderFinancialTermsInput? Financial = null);
 
 public sealed record EditOrderCommand(
     Guid OrderId,
@@ -26,7 +27,24 @@ public sealed record EditOrderCommand(
     long ExpectedVersion,
     string IdempotencyKey,
     string? CustomerName = null,
-    OrderFulfillmentInput? Fulfillment = null);
+    OrderFulfillmentInput? Fulfillment = null,
+    OrderFinancialTermsInput? Financial = null);
+
+public sealed record OrderFinancialTermsInput(
+    string PaymentCondition,
+    string PaymentMethod,
+    DateOnly? PaymentDueDate,
+    decimal DeliveryFee = 0,
+    decimal DiscountAmount = 0,
+    string? DiscountReason = null);
+
+public sealed record OrderFinancialTermsResult(
+    string PaymentCondition,
+    string PaymentMethod,
+    DateOnly? PaymentDueDate,
+    decimal DeliveryFee,
+    decimal DiscountAmount,
+    string? DiscountReason);
 
 public sealed record OrderFulfillmentInput(
     OrderFulfillmentType Type,
@@ -60,7 +78,8 @@ public sealed record OrderResult(
     int DailyCapacityUnits,
     decimal TotalAmount,
     IReadOnlyCollection<OrderItemResult> Items,
-    OrderFulfillmentResult Fulfillment);
+    OrderFulfillmentResult Fulfillment,
+    OrderFinancialTermsResult Financial);
 
 public sealed record OrderItemResult(
     Guid Id,

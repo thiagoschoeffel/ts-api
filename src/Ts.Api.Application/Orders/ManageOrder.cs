@@ -66,7 +66,8 @@ public sealed class CreateOrderHandler(
                     command.OperationalDate,
                     command.Items,
                     command.CustomerName,
-                    command.Fulfillment))
+                    command.Fulfillment,
+                    command.Financial))
             {
                 throw new ConflictException("A chave de idempotência já foi usada com outro conteúdo de pedido.");
             }
@@ -87,7 +88,8 @@ public sealed class CreateOrderHandler(
             definitions,
             idempotencyKey,
             customer?.Name ?? command.CustomerName,
-            fulfillment);
+            fulfillment,
+            MapFinancial(command.Financial));
         await store.AddAsync(order, cancellationToken);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
@@ -120,6 +122,11 @@ public sealed class CreateOrderHandler(
             address?.Neighborhood, address?.City, address?.State, address?.PostalCode,
             address?.ReferencePoint, input.DeliveryWindow);
     }
+
+    internal static OrderFinancialTermsDefinition? MapFinancial(OrderFinancialTermsInput? input) => input is null
+        ? null
+        : new(input.PaymentCondition, input.PaymentMethod, input.PaymentDueDate,
+            input.DeliveryFee, input.DiscountAmount, input.DiscountReason);
 
     internal static string ValidateIdempotencyKey(string value)
     {
@@ -158,7 +165,8 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
                     command.OperationalDate,
                     command.Items,
                     command.CustomerName,
-                    command.Fulfillment))
+                    command.Fulfillment,
+                    command.Financial))
             {
                 throw new ConflictException(
                     "A chave de idempotência já foi usada para outro pedido ou conteúdo.");
@@ -186,7 +194,8 @@ public sealed class EditOrderHandler(IOrderManagementStore store)
         var definitions = await OrderItemResolver.ResolveAsync(store, command.OperationalDate, command.Items, cancellationToken);
         var fulfillment = await CreateOrderHandler.ResolveFulfillmentAsync(store, customer, command.CustomerId, command.CustomerName, command.Fulfillment, cancellationToken);
         var previousItems = order.Items.ToArray();
-        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, customer?.Name ?? command.CustomerName, fulfillment);
+        order.EditDraft(command.CustomerId, command.OperationalDate, definitions, idempotencyKey, customer?.Name ?? command.CustomerName, fulfillment,
+            CreateOrderHandler.MapFinancial(command.Financial));
         store.ReplaceItems(previousItems, order.Items);
         await store.SaveChangesAsync(cancellationToken);
         return OrderResultMapper.Map(order);
@@ -313,13 +322,15 @@ internal static class OrderResultMapper
         DateOnly operationalDate,
         IReadOnlyCollection<OrderItemInput> inputs,
         string? customerName = null,
-        OrderFulfillmentInput? fulfillment = null)
+        OrderFulfillmentInput? fulfillment = null,
+        OrderFinancialTermsInput? financial = null)
     {
         if (order.CustomerId != customerId
             || order.OperationalDate != operationalDate
             || customerName is not null && order.CustomerNameSnapshot != customerName.Trim()
             || order.Items.Count != inputs.Count
-            || !MatchesFulfillment(order, fulfillment))
+            || !MatchesFulfillment(order, fulfillment)
+            || !MatchesFinancial(order, financial))
         {
             return false;
         }
@@ -334,6 +345,18 @@ internal static class OrderResultMapper
             && (pair.First.FulfillmentMode == OfferFulfillmentMode.FrozenStock
                 ? pair.Second.UnitPrice is null
                 : pair.First.UnitPrice == pair.Second.UnitPrice));
+    }
+
+    private static bool MatchesFinancial(Order order, OrderFinancialTermsInput? input)
+    {
+        if (input is null) return order.PaymentCondition == "cash" && order.PaymentMethod == "pix"
+            && order.PaymentDueDate is null && order.DraftDeliveryFee == 0 && order.DraftDiscountAmount == 0;
+        return order.PaymentCondition == input.PaymentCondition.Trim().ToLowerInvariant()
+            && order.PaymentMethod == input.PaymentMethod.Trim().ToLowerInvariant()
+            && order.PaymentDueDate == input.PaymentDueDate
+            && order.DraftDeliveryFee == input.DeliveryFee
+            && order.DraftDiscountAmount == input.DiscountAmount
+            && order.DraftDiscountReason == (input.DiscountAmount > 0 ? input.DiscountReason?.Trim() : null);
     }
 
     private static bool MatchesFulfillment(Order order, OrderFulfillmentInput? input)
@@ -376,5 +399,7 @@ internal static class OrderResultMapper
             order.DeliveryWindow, order.FulfillmentFrozenAt,
             order.FulfillmentType == OrderFulfillmentType.Pickup
             || order.FulfillmentType == OrderFulfillmentType.Delivery
-               && order.FulfillmentStreet is not null && order.DeliveryWindow is not null));
+               && order.FulfillmentStreet is not null && order.DeliveryWindow is not null),
+        new OrderFinancialTermsResult(order.PaymentCondition, order.PaymentMethod, order.PaymentDueDate,
+            order.DraftDeliveryFee, order.DraftDiscountAmount, order.DraftDiscountReason));
 }

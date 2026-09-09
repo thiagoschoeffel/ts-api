@@ -31,7 +31,6 @@ public interface IMenuStore
     Task<IReadOnlyList<ProducibleItem>> GetProduciblesAsync(IReadOnlyCollection<Guid> ids, CancellationToken token);
     Task<WeeklyMenuPlan?> FindWeeklyPlanAsync(DateOnly weekStart, CancellationToken token);
     void Add(object entity);
-    void RemoveMenuChildren(DailyMenu menu);
     Task SaveChangesAsync(CancellationToken token);
 }
 
@@ -46,7 +45,7 @@ public sealed class MenuService(IMenuStore store, IOrganizationContext organizat
         await Validate(input, token); var existing = await store.FindMenuAsync(input.Date, token);
         if (existing is null) { existing = Create(input); store.Add(existing); }
         else { if (input.ExpectedVersion is not null && input.ExpectedVersion != existing.Version) throw new ConflictException("O cardápio foi alterado por outra pessoa.");
-            store.RemoveMenuChildren(existing); existing.Update(MapOptions(input), MapOffers(input), clock.GetUtcNow(), existing.Version); }
+            existing.Update(MapOptions(input), MapOffers(input), clock.GetUtcNow(), existing.Version); }
         await store.SaveChangesAsync(token); return (await MapMany([existing], token)).Single();
     }
     public async Task<DailyMenuView> PublishAsync(DateOnly date, long expectedVersion, CancellationToken token)

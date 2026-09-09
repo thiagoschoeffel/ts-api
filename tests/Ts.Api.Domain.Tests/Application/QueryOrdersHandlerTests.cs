@@ -78,6 +78,26 @@ public sealed class QueryOrdersHandlerTests
         Assert.Equal(OrderStatus.Confirmed, result.Status);
     }
 
+    [Fact]
+    public async Task Details_ExposesDraftFinancialTerms()
+    {
+        var offer = CatalogOffer.Create(OrganizationId, "Prato do dia", OfferFulfillmentMode.DailyProduction);
+        var dueDate = new DateOnly(2026, 9, 10);
+        var order = Order.CreateDraft(OrganizationId, Guid.NewGuid(), new DateOnly(2026, 9, 4),
+            [new OrderItemDefinition(offer.Id, offer.FulfillmentMode, 1, 30m, OfferName: offer.Name)],
+            financialTerms: new OrderFinancialTermsDefinition("deferred", "pix", dueDate, 5m, 3m, "Cortesia"));
+
+        var result = await new GetOrderDetailsHandler(new QueryStoreFake { Orders = [order] })
+            .HandleAsync(order.Id, CancellationToken.None);
+
+        Assert.Equal("deferred", result.Financial.PaymentCondition);
+        Assert.Equal("pix", result.Financial.PaymentMethod);
+        Assert.Equal(dueDate, result.Financial.PaymentDueDate);
+        Assert.Equal(5m, result.Financial.DeliveryFee);
+        Assert.Equal(3m, result.Financial.DiscountAmount);
+        Assert.Equal("Cortesia", result.Financial.DiscountReason);
+    }
+
     private sealed class QueryStoreFake : IOrderQueryStore
     {
         public IReadOnlyList<Order> Orders { get; init; } = [];

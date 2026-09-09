@@ -87,7 +87,8 @@ public sealed record OrderDetailsResult(
     IReadOnlyCollection<OrderItemResult> Items,
     OrderConfirmationEffectsResult? Confirmation,
     IReadOnlyCollection<OrderLifecycleEventResult> Lifecycle,
-    OrderFulfillmentResult Fulfillment);
+    OrderFulfillmentResult Fulfillment,
+    OrderFinancialTermsResult Financial);
 
 public sealed record OrderAuthoringOfferResult(
     Guid Id,
@@ -101,7 +102,8 @@ public sealed record OrderAuthoringAddressResult(
     Guid Id, string Label, string Street, string? Number, string? Complement,
     string? Neighborhood, string? City, string? State, string? PostalCode, string? Reference);
 public sealed record OrderAuthoringCustomerResult(
-    Guid Id, string Name, string Phone, IReadOnlyCollection<OrderAuthoringAddressResult> Addresses);
+    Guid Id, string Name, string Phone, IReadOnlyCollection<OrderAuthoringAddressResult> Addresses,
+    string? PreferredPaymentCondition = null, string? PreferredPaymentMethod = null);
 public sealed record OrderAuthoringMenuOptionResult(Guid Id, string Category, Guid ProducibleItemId,
     string ProducibleItemName, MenuAvailability Availability);
 
@@ -190,7 +192,8 @@ public sealed class GetOrderDetailsHandler(IOrderQueryStore store)
                     item.PreviousOperationalDate, item.NewOperationalDate, item.Reason, item.OccurredAt,
                     item.CommercialDisposition, item.FrozenDisposition, item.CapacityUnitsReleased,
                     item.PlanCreditsReversed, item.FinancialCreditReversed, item.ChargesCancelled)).ToArray(),
-            OrderResultMapper.Map(order).Fulfillment);
+            OrderResultMapper.Map(order).Fulfillment,
+            OrderResultMapper.Map(order).Financial);
     }
 }
 
@@ -216,7 +219,8 @@ public sealed class GetOrderAuthoringContextHandler(IOrderQueryStore store)
                 addresses.Where(address => address.CustomerId == item.Id).Select(address => new OrderAuthoringAddressResult(
                     address.Id, address.Label, address.Street, address.Number, address.Complement,
                     address.Neighborhood, address.City, address.State, address.PostalCode,
-                    address.ReferencePoint)).ToArray())).ToArray(),
+                    address.ReferencePoint)).ToArray(), item.PreferredPaymentCondition,
+                item.PreferredPaymentMethod)).ToArray(),
             visibleOffers.Select(item => new OrderAuthoringOfferResult(item.Id, item.Name, item.FulfillmentMode,
                 dailyOffers?.GetValueOrDefault(item.Id)?.EffectivePrice, item.RequiresMenuChoice)).ToArray(),
             producibles.Select(item => new OrderAuthoringProducibleResult(item.Id, item.Name)).ToArray(),
