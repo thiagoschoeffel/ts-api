@@ -9,8 +9,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__Database: Host=postgres;Port=5432;Database=${POSTGRES_DB:-ts_api};Username=${POSTGRES_USER:-ts_api};Password=${POSTGRES_PASSWORD:-change-me}
-      Authentication__Authority: http://localhost:${IDENTITY_PORT:-8081}/realms/sabor-sante
-      Authentication__MetadataAddress: http://identity:8080/realms/sabor-sante/.well-known/openid-configuration
+      Authentication__Authority: http://localhost:${IDENTITY_PORT:-8081}/realms/ts
+      Authentication__MetadataAddress: http://identity:8080/realms/ts/.well-known/openid-configuration
       Authentication__Audience: ts-api
       Authentication__RequireHttpsMetadata: "false"
       Authentication__PlatformMfaClaimType: ${PLATFORM_MFA_CLAIM_TYPE:-amr}
@@ -45,7 +45,7 @@ services:
       - ./identity:/opt/keycloak/data/import:ro
       - keycloak-data:/opt/keycloak/data
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /realms/sabor-sante HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /realms/ts HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
       interval: 5s
       timeout: 3s
       retries: 20

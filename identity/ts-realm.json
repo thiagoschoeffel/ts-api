@@ -1,8 +1,8 @@
 {
-  "realm": "sabor-sante",
-  "displayName": "Sabor Santè",
+  "realm": "ts",
+  "displayName": "TS",
   "enabled": true,
-  "sslRequired": "none",
+  "sslRequired": "external",
   "internationalizationEnabled": true,
   "supportedLocales": ["pt-BR"],
   "defaultLocale": "pt-BR",
@@ -11,22 +11,28 @@
   "clients": [
     {
       "clientId": "ts-api",
-      "name": "Sabor Santè API",
+      "name": "TS API",
       "enabled": true,
       "bearerOnly": true
     },
     {
       "clientId": "ts-host",
-      "name": "Sabor Santè Web",
+      "name": "TS Web",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
-      "redirectUris": ["http://localhost:4173/*"],
-      "webOrigins": ["http://localhost:4173"],
+      "redirectUris": [
+        "http://localhost:4173/*",
+        "https://ts.thiagoschoeffel.com.br/*"
+      ],
+      "webOrigins": [
+        "http://localhost:4173",
+        "https://ts.thiagoschoeffel.com.br"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:4173/*"
+        "post.logout.redirect.uris": "+"
       },
       "protocolMappers": [
         {

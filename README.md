@@ -1,6 +1,6 @@
 # TS API
 
-API autoritativa da Sabor Santè, construída em .NET 10 e organizada como monólito modular.
+API autoritativa da plataforma TS, construída em .NET 10 e organizada como monólito modular.
 
 > **Estado atual:** os épicos E02–E13 estão concluídos. A fundação autoritativa,
 > o ciclo transacional de Pedidos e as integrações de Congelados, Pedidos e
@@ -237,7 +237,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-A API fica em `http://localhost:8080` e o Keycloak local em `http://localhost:8081`. O realm de desenvolvimento cria `admin@saborsante.local` com senha temporária `change-me`; altere-a no primeiro login. Verificações:
+A API fica em `http://localhost:8080` e o Keycloak local em `http://localhost:8081`. O realm `ts` de desenvolvimento cria `admin@saborsante.local`, usuário da primeira organização, com senha temporária `change-me`; altere-a no primeiro login. Verificações:
 
 ```text
 GET /health/live
