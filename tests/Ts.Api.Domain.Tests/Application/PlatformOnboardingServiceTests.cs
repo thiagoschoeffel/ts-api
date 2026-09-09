@@ -111,7 +111,8 @@ public sealed class PlatformOnboardingServiceTests
         public Task<bool> OrganizationSlugExistsAsync(string slug, CancellationToken token) =>
             Task.FromResult(Organizations.Any(item => item.Slug == slug));
         public Task<(IReadOnlyCollection<PlatformOnboardingWork> Items, int Total)> ListAsync(
-            PlatformOnboardingStatus? status, int skip, int take, CancellationToken token)
+            PlatformOnboardingStatus? status, PlatformOnboardingSort sortBy,
+            PlatformSortDirection sortDirection, int skip, int take, CancellationToken token)
         {
             var all = Onboardings.Where(item => !status.HasValue || item.Status == status.Value)
                 .Select(Work).ToArray();

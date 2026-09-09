@@ -50,8 +50,9 @@ public static class Endpoints
             .RequireAuthorization(AuthorizationPolicies.PlatformRead)
             .WithName("GetPlatformAccess");
         platform.MapGet("/organizations", (string? search, OrganizationLifecycleStatus? status,
+                PlatformOrganizationSort? sortBy, PlatformSortDirection? sortDirection,
                 int page, int pageSize, PlatformRegistryService service, CancellationToken token) =>
-                service.ListOrganizationsAsync(search, status, page == 0 ? 1 : page,
+                service.ListOrganizationsAsync(search, status, sortBy, sortDirection, page == 0 ? 1 : page,
                     pageSize == 0 ? 20 : pageSize, token))
             .RequireAuthorization(AuthorizationPolicies.PlatformRead)
             .WithName("GetPlatformOrganizations");
@@ -91,15 +92,18 @@ public static class Endpoints
                 DisableExternalIntegrationAsync)
             .RequireAuthorization(AuthorizationPolicies.PlatformAdminister)
             .WithName("DisableOrganizationExternalIntegration");
-        platform.MapGet("/audit-events", (string? action, Guid? targetId, int page, int pageSize,
+        platform.MapGet("/audit-events", (string? action, Guid? targetId,
+                PlatformAuditSort? sortBy, PlatformSortDirection? sortDirection, int page, int pageSize,
                 PlatformRegistryService service, CancellationToken token) =>
-                service.ListAuditAsync(action, targetId, page == 0 ? 1 : page,
+                service.ListAuditAsync(action, targetId, sortBy, sortDirection, page == 0 ? 1 : page,
                     pageSize == 0 ? 20 : pageSize, token))
             .RequireAuthorization(AuthorizationPolicies.PlatformAuditRead)
             .WithName("GetPlatformAuditEvents");
-        platform.MapGet("/onboardings", (PlatformOnboardingStatus? status, int page, int pageSize,
+        platform.MapGet("/onboardings", (PlatformOnboardingStatus? status,
+                PlatformOnboardingSort? sortBy, PlatformSortDirection? sortDirection, int page, int pageSize,
                 PlatformOnboardingService service, CancellationToken token) =>
-                service.ListAsync(status, page == 0 ? 1 : page, pageSize == 0 ? 20 : pageSize, token))
+                service.ListAsync(status, sortBy, sortDirection,
+                    page == 0 ? 1 : page, pageSize == 0 ? 20 : pageSize, token))
             .RequireAuthorization(AuthorizationPolicies.PlatformOnboarding)
             .WithName("GetPlatformOnboardings");
         platform.MapGet("/onboardings/{id:guid}", (Guid id, PlatformOnboardingService service,

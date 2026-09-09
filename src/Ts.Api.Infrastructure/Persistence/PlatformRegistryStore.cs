@@ -8,8 +8,8 @@ namespace Ts.Api.Infrastructure.Persistence;
 public sealed class PlatformRegistryStore(AppDbContext database) : IPlatformRegistryStore
 {
     public async Task<(IReadOnlyCollection<Organization> Items, int Total)> ListOrganizationsAsync(
-        string? search, OrganizationLifecycleStatus? status, int skip, int take,
-        CancellationToken token)
+        string? search, OrganizationLifecycleStatus? status, PlatformOrganizationSort sortBy,
+        PlatformSortDirection sortDirection, int skip, int take, CancellationToken token)
     {
         var query = database.Organizations.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(search))
@@ -20,7 +20,18 @@ public sealed class PlatformRegistryStore(AppDbContext database) : IPlatformRegi
         }
         if (status.HasValue) query = query.Where(item => item.LifecycleStatus == status);
         var total = await query.CountAsync(token);
-        var items = await query.OrderBy(item => item.Name).ThenBy(item => item.Id)
+        var descending = sortDirection == PlatformSortDirection.Desc;
+        var ordered = sortBy switch
+        {
+            PlatformOrganizationSort.Slug => descending ? query.OrderByDescending(item => item.Slug) : query.OrderBy(item => item.Slug),
+            PlatformOrganizationSort.Status => descending ? query.OrderByDescending(item => item.LifecycleStatus) : query.OrderBy(item => item.LifecycleStatus),
+            PlatformOrganizationSort.Version => descending ? query.OrderByDescending(item => item.Version) : query.OrderBy(item => item.Version),
+            _ => descending ? query.OrderByDescending(item => item.Name) : query.OrderBy(item => item.Name)
+        };
+        var stableOrder = descending
+            ? ordered.ThenByDescending(item => item.Id)
+            : ordered.ThenBy(item => item.Id);
+        var items = await stableOrder
             .Skip(skip).Take(take).ToArrayAsync(token);
         return (items, total);
     }
@@ -29,13 +40,25 @@ public sealed class PlatformRegistryStore(AppDbContext database) : IPlatformRegi
         database.Organizations.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, token);
 
     public async Task<(IReadOnlyCollection<PlatformAuditEvent> Items, int Total)> ListAuditAsync(
-        string? action, Guid? targetId, int skip, int take, CancellationToken token)
+        string? action, Guid? targetId, PlatformAuditSort sortBy,
+        PlatformSortDirection sortDirection, int skip, int take, CancellationToken token)
     {
         var query = database.PlatformAuditEvents.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(action)) query = query.Where(item => item.Action == action);
         if (targetId.HasValue) query = query.Where(item => item.TargetId == targetId);
         var total = await query.CountAsync(token);
-        var items = await query.OrderByDescending(item => item.OccurredAt).ThenByDescending(item => item.Id)
+        var descending = sortDirection == PlatformSortDirection.Desc;
+        var ordered = sortBy switch
+        {
+            PlatformAuditSort.Action => descending ? query.OrderByDescending(item => item.Action) : query.OrderBy(item => item.Action),
+            PlatformAuditSort.ActorKind => descending ? query.OrderByDescending(item => item.ActorKind) : query.OrderBy(item => item.ActorKind),
+            PlatformAuditSort.Result => descending ? query.OrderByDescending(item => item.Result) : query.OrderBy(item => item.Result),
+            _ => descending ? query.OrderByDescending(item => item.OccurredAt) : query.OrderBy(item => item.OccurredAt)
+        };
+        var stableOrder = descending
+            ? ordered.ThenByDescending(item => item.Id)
+            : ordered.ThenBy(item => item.Id);
+        var items = await stableOrder
             .Skip(skip).Take(take).ToArrayAsync(token);
         return (items, total);
     }
@@ -114,12 +137,48 @@ public sealed class PlatformOnboardingStore(AppDbContext database) : IPlatformOn
         database.Organizations.AnyAsync(item => item.Slug == slug, token);
 
     public async Task<(IReadOnlyCollection<PlatformOnboardingWork> Items, int Total)> ListAsync(
-        PlatformOnboardingStatus? status, int skip, int take, CancellationToken token)
+        PlatformOnboardingStatus? status, PlatformOnboardingSort sortBy,
+        PlatformSortDirection sortDirection, int skip, int take, CancellationToken token)
     {
         var query = database.PlatformOnboardings.AsNoTracking();
         if (status.HasValue) query = query.Where(item => item.Status == status);
         var total = await query.CountAsync(token);
-        var onboardings = await query.OrderByDescending(item => item.UpdatedAt).ThenBy(item => item.Id)
+        var sortableQuery = query
+            .Join(database.Organizations.AsNoTracking(), onboarding => onboarding.OrganizationId,
+                organization => organization.Id, (onboarding, organization) => new
+                {
+                    Onboarding = onboarding,
+                    OrganizationName = organization.Name
+                })
+            .Join(database.PlatformProvisioningOperations.AsNoTracking(),
+                item => item.Onboarding.Id, operation => operation.OnboardingId,
+                (item, operation) => new
+                {
+                    item.Onboarding,
+                    item.OrganizationName,
+                    operation.Attempts
+                });
+        var descending = sortDirection == PlatformSortDirection.Desc;
+        var ordered = sortBy switch
+        {
+            PlatformOnboardingSort.OrganizationName => descending
+                ? sortableQuery.OrderByDescending(item => item.OrganizationName)
+                : sortableQuery.OrderBy(item => item.OrganizationName),
+            PlatformOnboardingSort.OwnerEmail => descending
+                ? sortableQuery.OrderByDescending(item => item.Onboarding.OwnerEmail)
+                : sortableQuery.OrderBy(item => item.Onboarding.OwnerEmail),
+            PlatformOnboardingSort.Status => descending
+                ? sortableQuery.OrderByDescending(item => item.Onboarding.Status)
+                : sortableQuery.OrderBy(item => item.Onboarding.Status),
+            PlatformOnboardingSort.Attempts => descending
+                ? sortableQuery.OrderByDescending(item => item.Attempts)
+                : sortableQuery.OrderBy(item => item.Attempts),
+            _ => descending
+                ? sortableQuery.OrderByDescending(item => item.Onboarding.UpdatedAt)
+                : sortableQuery.OrderBy(item => item.Onboarding.UpdatedAt)
+        };
+        var onboardings = await ordered.ThenBy(item => item.Onboarding.Id)
+            .Select(item => item.Onboarding)
             .Skip(skip).Take(take).ToArrayAsync(token);
         var items = new List<PlatformOnboardingWork>(onboardings.Length);
         foreach (var onboarding in onboardings)

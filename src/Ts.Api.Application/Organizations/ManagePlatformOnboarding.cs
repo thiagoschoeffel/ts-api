@@ -21,6 +21,7 @@ public sealed record PlatformOnboardingAccepted(Guid OnboardingId, Guid Operatio
 public sealed record PlatformOnboardingWork(PlatformOnboarding Onboarding,
     PlatformProvisioningOperation Operation, PlatformOutboxMessage Outbox,
     OrganizationInvitation Invitation, Organization Organization);
+public enum PlatformOnboardingSort { OrganizationName, OwnerEmail, Status, Attempts, UpdatedAt }
 
 public interface IOnboardingInvitationTokenFactory
 {
@@ -32,7 +33,8 @@ public interface IPlatformOnboardingStore
     Task<PlatformProvisioningOperation?> FindOperationByIdempotencyKeyAsync(string key, CancellationToken token);
     Task<bool> OrganizationSlugExistsAsync(string slug, CancellationToken token);
     Task<(IReadOnlyCollection<PlatformOnboardingWork> Items, int Total)> ListAsync(
-        PlatformOnboardingStatus? status, int skip, int take, CancellationToken token);
+        PlatformOnboardingStatus? status, PlatformOnboardingSort sortBy,
+        PlatformSortDirection sortDirection, int skip, int take, CancellationToken token);
     Task<PlatformOnboardingWork?> FindAsync(Guid onboardingId, CancellationToken token);
     Task<PlatformOnboardingWork?> FindByOperationAsync(Guid operationId, CancellationToken token);
     Task<PlatformProvisioningOperation?> FindClaimableOperationAsync(DateTimeOffset now, CancellationToken token);
@@ -89,10 +91,13 @@ public sealed class PlatformOnboardingService(IPlatformOnboardingStore store,
     }
 
     public async Task<PageResult<PlatformOnboardingSummary>> ListAsync(PlatformOnboardingStatus? status,
+        PlatformOnboardingSort? sortBy, PlatformSortDirection? sortDirection,
         int page, int pageSize, CancellationToken token)
     {
         ValidatePage(page, pageSize);
-        var result = await store.ListAsync(status, (page - 1) * pageSize, pageSize, token);
+        var result = await store.ListAsync(status, sortBy ?? PlatformOnboardingSort.UpdatedAt,
+            sortDirection ?? PlatformSortDirection.Desc,
+            (page - 1) * pageSize, pageSize, token);
         return new(result.Items.Select(MapSummary).ToArray(), page, pageSize, result.Total);
     }
 
