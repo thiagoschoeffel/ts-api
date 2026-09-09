@@ -219,6 +219,13 @@ Idempotency-Key: order-create-2026-09-05-01
   ]
 }
 
+### Consulte o histórico de Pedidos por período, com filtros e paginação
+
+GET {{Ts_Api_HostAddress}}/api/orders?from=2026-09-01&to=2026-09-30&statusGroup=All&sortBy=OperationalDate&sortDirection=Desc&page=1&pageSize=20
+Authorization: Bearer {{accessToken}}
+X-Organization-Id: {{organizationId}}
+Accept: application/json
+
 ### Consulte o Pedido e use a versão devolvida nas escritas seguintes
 
 GET {{Ts_Api_HostAddress}}/api/orders/00000000-0000-0000-0000-000000000000

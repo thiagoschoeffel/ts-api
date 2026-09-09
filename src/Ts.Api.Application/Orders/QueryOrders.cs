@@ -1,5 +1,6 @@
 using Ts.Api.Application.Common;
 using Ts.Api.Domain.Catalog;
+using Ts.Api.Domain.Common;
 using Ts.Api.Domain.FrozenStock;
 using Ts.Api.Domain.Orders;
 using Ts.Api.Domain.Menus;
@@ -11,12 +12,40 @@ namespace Ts.Api.Application.Orders;
 public sealed record OrderListItemResult(
     Guid Id,
     Guid CustomerId,
+    string CustomerName,
     DateOnly OperationalDate,
     OrderStatus Status,
     long Version,
     int ItemCount,
     int DailyCapacityUnits,
     decimal TotalAmount);
+
+public enum OrderListStatusGroup { All, Open, InProgress, Completed, Problems }
+public enum OrderListSort { OperationalDate, Customer, Status, ItemCount, DailyCapacityUnits, TotalAmount }
+public enum OrderListSortDirection { Asc, Desc }
+
+public sealed record OrderListQuery(
+    DateOnly? From,
+    DateOnly? To,
+    string? Search,
+    OrderListStatusGroup StatusGroup,
+    OrderListSort SortBy,
+    OrderListSortDirection SortDirection,
+    int Page,
+    int PageSize);
+
+public sealed record OrderStatusCountsResult(int All, int Open, int InProgress, int Completed, int Problems);
+public sealed record OrderListPageResult(
+    IReadOnlyCollection<OrderListItemResult> Items,
+    int Page,
+    int PageSize,
+    int Total,
+    OrderStatusCountsResult Counts);
+
+public sealed record OrderQueryPage(
+    IReadOnlyCollection<Order> Items,
+    int Total,
+    IReadOnlyDictionary<OrderStatus, int> StatusCounts);
 
 public sealed record OrderConfirmationEffectsResult(
     DateTimeOffset ConfirmedAt,
@@ -95,7 +124,7 @@ public sealed record OrderAuthoringContextResult(
 
 public interface IOrderQueryStore
 {
-    Task<IReadOnlyList<Order>> GetOrdersAsync(CancellationToken cancellationToken);
+    Task<OrderQueryPage> GetOrdersAsync(OrderListQuery query, CancellationToken cancellationToken);
     Task<Order?> FindOrderDetailsAsync(Guid orderId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogOffer>> GetActiveOffersAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<Customer>> GetActiveCustomersAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<Customer>>([]);
@@ -109,12 +138,27 @@ public interface IOrderQueryStore
 
 public sealed class ListOrdersHandler(IOrderQueryStore store)
 {
-    public async Task<IReadOnlyCollection<OrderListItemResult>> HandleAsync(CancellationToken cancellationToken) =>
-        (await store.GetOrdersAsync(cancellationToken))
-        .Select(order => new OrderListItemResult(
-            order.Id, order.CustomerId, order.OperationalDate, order.Status, order.Version,
+    public async Task<OrderListPageResult> HandleAsync(OrderListQuery query, CancellationToken cancellationToken)
+    {
+        if (query.Page < 1 || query.PageSize is < 1 or > 100)
+            throw new DomainException("A página deve ser positiva e pageSize deve estar entre 1 e 100.");
+        if (query.From.HasValue && query.To.HasValue && query.From > query.To)
+            throw new DomainException("A data inicial não pode ser posterior à data final.");
+
+        var page = await store.GetOrdersAsync(query with { Search = query.Search?.Trim() }, cancellationToken);
+        var items = page.Items.Select(order => new OrderListItemResult(
+            order.Id, order.CustomerId, order.CustomerNameSnapshot, order.OperationalDate, order.Status, order.Version,
             order.Items.Sum(item => item.Quantity), order.DailyCapacityUnits, order.TotalAmount))
         .ToArray();
+        int Count(params OrderStatus[] statuses) => statuses.Sum(status => page.StatusCounts.GetValueOrDefault(status));
+        var counts = new OrderStatusCountsResult(
+            page.StatusCounts.Values.Sum(),
+            Count(OrderStatus.Open),
+            Count(OrderStatus.Confirmed, OrderStatus.InProduction, OrderStatus.InPacking, OrderStatus.InDelivery),
+            Count(OrderStatus.Completed),
+            Count(OrderStatus.Cancelled, OrderStatus.DeliveryFailed));
+        return new(items, query.Page, query.PageSize, page.Total, counts);
+    }
 }
 
 public sealed class GetOrderDetailsHandler(IOrderQueryStore store)
