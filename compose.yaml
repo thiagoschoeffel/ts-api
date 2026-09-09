@@ -13,6 +13,8 @@ services:
       Authentication__MetadataAddress: http://identity:8080/realms/sabor-sante/.well-known/openid-configuration
       Authentication__Audience: ts-api
       Authentication__RequireHttpsMetadata: "false"
+      Authentication__PlatformMfaClaimType: ${PLATFORM_MFA_CLAIM_TYPE:-amr}
+      Authentication__PlatformMfaClaimValue: ${PLATFORM_MFA_CLAIM_VALUE:-mfa}
       Resend__ApiKey: ${RESEND_API_KEY:-}
       Resend__From: ${RESEND_FROM:-}
       Resend__InvitationUrl: ${INVITATION_URL:-http://localhost:4173/convites/aceitar}

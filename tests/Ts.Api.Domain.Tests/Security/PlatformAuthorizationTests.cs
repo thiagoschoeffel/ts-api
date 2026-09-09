@@ -7,6 +7,41 @@ namespace Ts.Api.Domain.Tests.Security;
 
 public sealed class PlatformAuthorizationTests
 {
+    [Theory]
+    [InlineData("mfa")]
+    [InlineData("pwd mfa")]
+    [InlineData("[\"pwd\",\"mfa\"]")]
+    public async Task Platform_access_requires_the_configured_mfa_evidence(string claimValue)
+    {
+        var requirement = new PlatformMfaRequirement("amr", "mfa");
+        var principal = new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("amr", claimValue)], "test"));
+        var context = new AuthorizationHandlerContext([requirement], principal, null);
+
+        await new PlatformMfaAuthorizationHandler().HandleAsync(context);
+
+        Assert.True(context.HasSucceeded);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("amr", "pwd")]
+    [InlineData("acr", "mfa")]
+    public async Task Platform_access_rejects_missing_or_incorrect_mfa_evidence(
+        string? claimType, string? claimValue)
+    {
+        var requirement = new PlatformMfaRequirement("amr", "mfa");
+        var claims = claimType is null ? [] : new[] { new System.Security.Claims.Claim(claimType, claimValue!) };
+        var principal = new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(claims, "test"));
+        var context = new AuthorizationHandlerContext([requirement], principal, null);
+
+        await new PlatformMfaAuthorizationHandler().HandleAsync(context);
+
+        Assert.False(context.HasSucceeded);
+    }
+
     [Fact]
     public async Task Tenant_owner_does_not_receive_platform_capabilities()
     {
